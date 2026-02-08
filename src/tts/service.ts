@@ -21,21 +21,43 @@ export type LanguageDetector = (text: string) => Promise<LanguageDetectionResult
 /**
  * TTSService - Main Text-to-Speech service
  * Orchestrates language detection, text preprocessing, and audio generation
+ * 
+ * Uses Singleton pattern to ensure only one instance exists.
  */
 export class TTSService {
+    private static instance: TTSService | null = null;
     private supertonic: SupertonicTTS;
     private fileHandler: FileHandler;
     private languageDetector: LanguageDetector;
 
     /**
-     * Create a TTSService instance
-     * @param to save generated audio files (default: outputDir - Directory './output')
-     * @param languageDetector - Optional custom language detector function. If not provided, uses the default simple detector
+     * Private constructor to enforce singleton pattern
+     * Use getInstance() instead of new TTSService()
      */
-    constructor(outputDir: string = './output', languageDetector?: LanguageDetector) {
+    private constructor(outputDir: string = './output', languageDetector?: LanguageDetector) {
         this.fileHandler = new FileHandler({ outputDir });
         this.supertonic = new SupertonicTTS('F1'); // Default voice: F1
         this.languageDetector = languageDetector || defaultDetectLanguageFromPreprocessor;
+    }
+
+    /**
+     * Get the singleton instance of TTSService
+     * @param outputDir - Directory to save generated audio files (only used on first call)
+     * @param languageDetector - Optional custom language detector function (only used on first call)
+     * @returns The singleton TTSService instance
+     */
+    static getInstance(outputDir: string = './output', languageDetector?: LanguageDetector): TTSService {
+        if (TTSService.instance === null) {
+            TTSService.instance = new TTSService(outputDir, languageDetector);
+        }
+        return TTSService.instance;
+    }
+
+    /**
+     * Reset the singleton instance (useful for testing)
+     */
+    static resetInstance(): void {
+        TTSService.instance = null;
     }
 
     /**

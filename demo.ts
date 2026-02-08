@@ -15,8 +15,8 @@ import type { Language } from './src/tts/types.js';
 
 async function main() {
     try {
-        // Create TTS service with output directory
-        const tts = new TTSService('./output');
+        // Create TTS service with output directory (singleton)
+        const tts = TTSService.getInstance('./output');
 
         console.log('='.repeat(60));
         console.log('SUPERTONIC TTS DEMO');
@@ -104,8 +104,8 @@ async function main() {
             }
         };
 
-        // Create a new service instance with custom detector
-        const customTts = new TTSService('./output', customDetector);
+        // Get TTS service with custom detector (singleton with custom config on first call)
+        const customTts = TTSService.getInstance('./output', customDetector);
 
         const customText = "Hola, this is a mixed text with español and English.";
         const customResult = await customTts.synthesize(
