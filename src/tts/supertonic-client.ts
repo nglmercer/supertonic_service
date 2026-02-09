@@ -1,4 +1,5 @@
 import { pipeline, type TextToAudioOutput, type TextToAudioPipelineOptions, env } from '@huggingface/transformers';
+import * as os from 'os';
 import * as path from 'path';
 import { VOICES, type VoiceKey, type AudioOutput } from './types.js';
 import { BASE_URL } from './constants.js';
@@ -6,6 +7,13 @@ import { BASE_URL } from './constants.js';
 // Set local cache directory to avoid conflicts and fix corruption issues
 env.cacheDir = path.resolve(process.cwd(), '.cache');
 env.allowLocalModels = false; // Force checking remote/cache
+
+// Configure ONNX Runtime to use explicit thread count
+// This prevents pthread_setaffinity_np errors on some devices
+// Must be set before loading any ONNX models
+const numCpus = os.cpus().length;
+const numThreads = Math.min(numCpus, 4); // Limit to 4 threads max for stability
+process.env.ORT_NUM_THREADS = String(numThreads);
 
 /**
  * Internal client for Supertonic TTS using HuggingFace Transformers
