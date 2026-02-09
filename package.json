@@ -3,14 +3,22 @@
   "module": "src/index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "start": "bun run src/server.ts",
+    "dev": "NODE_ENV=development bun run src/server.ts",
+    "demo": "bun run demo.ts"
+  },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/node": "^20.10.0"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
+    "moleculer": "^0.14.35",
+    "moleculer-web": "^0.10.7",
     "onnxruntime-node": "1.21.0"
   },
   "trustedDependencies": [
