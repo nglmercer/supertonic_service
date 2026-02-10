@@ -31,20 +31,11 @@ jobs:
       - name: Run tests
         run: bun test
 
-  # Build job - creates binaries for multiple platforms
-  build:
-    name: Build ${{ matrix.target }}
+  # Build x86_64 binary
+  build-x86_64:
+    name: Build x86_64
     needs: test
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - target: bun-linux-x64
-            arch: linux-x86_64
-            artifact_name: supertonic-linux-x86_64
-          - target: bun-linux-arm64
-            arch: linux-arm64
-            artifact_name: supertonic-linux-arm64
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -61,134 +52,111 @@ jobs:
         run: |
           bun build ./src/server.ts \
             --compile \
-            --target=${{ matrix.target }} \
-            --outfile=./dist/${{ matrix.artifact_name }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: ./dist/${{ matrix.artifact_name }}
-          retention-days: 7
-
-  # Build client binaries
-  build-client:
-    name: Build Client ${{ matrix.target }}
-    needs: test
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - target: bun-linux-x64
-            arch: linux-x86_64
-            artifact_name: supertonic-client-linux-x86_64
-          - target: bun-linux-arm64
-            arch: linux-arm64
-            artifact_name: supertonic-client-linux-arm64
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+            --target=bun-linux-x64 \
+            --outfile=./dist/supertonic-linux-x86_64
 
       - name: Build client binary
         run: |
           bun build ./examples/client.ts \
             --compile \
-            --target=${{ matrix.target }} \
-            --outfile=./dist/${{ matrix.artifact_name }}
+            --target=bun-linux-x64 \
+            --outfile=./dist/supertonic-client-linux-x86_64
+
+      - name: Copy native libraries
+        run: |
+          mkdir -p ./dist/lib/x64
+          cp node_modules/onnxruntime-node/bin/napi-v3/linux/x64/*.so* ./dist/lib/x64/ 2>/dev/null || true
+          cp node_modules/onnxruntime-node/bin/napi-v3/linux/x64/*.node ./dist/lib/x64/ 2>/dev/null || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ./dist/${{ matrix.artifact_name }}
+          name: supertonic-linux-x86_64
+          path: ./dist/
           retention-days: 7
 
-  # Release job - creates GitHub release with binaries
-  release:
-    name: Create Release
-    needs: [build, build-client]
-    runs-on: ubuntu-latest
-    if: github.event_name == 'release'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./dist
-
-      - name: Create startup script
-        run: |
-          cat > ./dist/start.sh << 'EOF'
-          #!/bin/bash
-          # Supertonic TTS Service Startup Script
-          
-          export PORT=${PORT:-3000}
-          export HOST=${HOST:-0.0.0.0}
-          export TTS_OUTPUT_DIR=${TTS_OUTPUT_DIR:-./output}
-          export TTS_DEFAULT_VOICE=${TTS_DEFAULT_VOICE:-F1}
-          
-          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-          
-          ARCH=$(uname -m)
-          case $ARCH in
-              x86_64|amd64)
-                  BINARY="${SCRIPT_DIR}/supertonic-linux-x86_64"
-                  ;;
-              aarch64|arm64)
-                  BINARY="${SCRIPT_DIR}/supertonic-linux-arm64"
-                  ;;
-              *)
-                  echo "Unsupported architecture: $ARCH"
-                  exit 1
-                  ;;
-          esac
-          
-          if [ ! -f "$BINARY" ]; then
-              echo "Binary not found: $BINARY"
-              exit 1
-          fi
-          
-          mkdir -p $TTS_OUTPUT_DIR
-          exec "$BINARY"
-          EOF
-          chmod +x ./dist/start.sh
-
-      - name: Create release archive
-        run: |
-          cd dist
-          tar -czvf supertonic-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz \
-            supertonic-linux-x86_64 supertonic-client-linux-x86_64 start.sh
-          tar -czvf supertonic-${{ github.event.release.tag_name }}-linux-arm64.tar.gz \
-            supertonic-linux-arm64 supertonic-client-linux-arm64 start.sh
-
-      - name: Upload Release Assets
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            ./dist/supertonic-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz
-            ./dist/supertonic-${{ github.event.release.tag_name }}-linux-arm64.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Optional: Docker build job
-  docker:
-    name: Build Docker Image
+  # Build ARM64 using Docker (recommended for cross-platform)
+  build-arm64-docker:
+    name: Build ARM64 (Docker)
     needs: test
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' || github.ref == 'refs/heads/main'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build ARM64 binary in Docker
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v $(pwd):/app -w /app \
+            oven/bun:${{ env.BUN_VERSION }} \
+            bash -c "bun install && bun build ./src/server.ts --compile --target=bun-linux-arm64 --outfile=./dist/supertonic-linux-arm64 && bun build ./examples/client.ts --compile --target=bun-linux-arm64 --outfile=./dist/supertonic-client-linux-arm64"
+
+      - name: Copy ARM64 native libraries
+        run: |
+          mkdir -p ./dist/lib/arm64
+          cp node_modules/onnxruntime-node/bin/napi-v3/linux/arm64/*.so* ./dist/lib/arm64/ 2>/dev/null || true
+          cp node_modules/onnxruntime-node/bin/napi-v3/linux/arm64/*.node ./dist/lib/arm64/ 2>/dev/null || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: supertonic-linux-arm64
+          path: ./dist/
+          retention-days: 7
+
+  # Test ARM64 binary in Docker
+  test-arm64-docker:
+    name: Test ARM64 (Docker)
+    needs: build-arm64-docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Download ARM64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: supertonic-linux-arm64
+          path: ./dist
+
+      - name: Test ARM64 server in Docker
+        run: |
+          chmod +x ./dist/supertonic-linux-arm64
+          
+          # Start server in background
+          docker run --rm --platform linux/arm64 -d --name supertonic-test \
+            -v $(pwd):/app -w /app \
+            -p 3000:3000 \
+            -e PORT=3000 -e HOST=0.0.0.0 \
+            oven/bun:${{ env.BUN_VERSION }}-slim \
+            ./dist/supertonic-linux-arm64
+          
+          # Wait for server to start
+          sleep 10
+          
+          # Test health endpoint
+          curl -f http://localhost:3000/health || exit 1
+          
+          # Stop container
+          docker stop supertonic-test
+
+  # Build Docker images for both platforms
+  docker:
+    name: Docker Image
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -220,3 +188,81 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Release job - creates GitHub release with binaries
+  release:
+    name: Create Release
+    needs: [build-x86_64, build-arm64-docker, test-arm64-docker]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download x86_64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: supertonic-linux-x86_64
+          path: ./dist-x86_64
+
+      - name: Download ARM64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: supertonic-linux-arm64
+          path: ./dist-arm64
+
+      - name: Create release archives
+        run: |
+          # Create startup script
+          cat > start.sh << 'EOF'
+          #!/bin/bash
+          export PORT=${PORT:-3000}
+          export HOST=${HOST:-0.0.0.0}
+          export TTS_OUTPUT_DIR=${TTS_OUTPUT_DIR:-./output}
+          export TTS_DEFAULT_VOICE=${TTS_DEFAULT_VOICE:-F1}
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          ARCH=$(uname -m)
+          case $ARCH in
+              x86_64|amd64)
+                  BINARY="${SCRIPT_DIR}/supertonic-linux-x86_64"
+                  LIB_DIR="${SCRIPT_DIR}/lib/x64"
+                  ;;
+              aarch64|arm64)
+                  BINARY="${SCRIPT_DIR}/supertonic-linux-arm64"
+                  LIB_DIR="${SCRIPT_DIR}/lib/arm64"
+                  ;;
+              *)
+                  echo "Unsupported architecture: $ARCH"
+                  exit 1
+                  ;;
+          esac
+          if [ ! -f "$BINARY" ]; then
+              echo "Binary not found: $BINARY"
+              exit 1
+          fi
+          if [ -d "$LIB_DIR" ]; then
+              export LD_LIBRARY_PATH="${LIB_DIR}:${LD_LIBRARY_PATH}"
+          fi
+          mkdir -p $TTS_OUTPUT_DIR
+          exec "$BINARY"
+          EOF
+          chmod +x start.sh
+
+          # Create x86_64 archive
+          cp start.sh ./dist-x86_64/
+          tar -czvf supertonic-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz -C ./dist-x86_64 .
+
+          # Create ARM64 archive
+          cp start.sh ./dist-arm64/
+          tar -czvf supertonic-${{ github.event.release.tag_name }}-linux-arm64.tar.gz -C ./dist-arm64 .
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ./supertonic-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz
+            ./supertonic-${{ github.event.release.tag_name }}-linux-arm64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -14,7 +14,9 @@
     "build": "bash scripts/build.sh current",
     "build:all": "bash scripts/build.sh all",
     "build:x86_64": "bash scripts/build.sh x86_64",
-    "build:arm64": "bash scripts/build.sh arm64"
+    "build:arm64": "bash scripts/build.sh arm64",
+    "build:docker": "bash scripts/build.sh docker",
+    "docker": "docker build -t supertonic . && docker run -p 3000:3000 supertonic"
   },
   "devDependencies": {
     "@types/bun": "latest",
