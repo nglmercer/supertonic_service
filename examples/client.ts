@@ -1,207 +1,249 @@
 /**
- * Moleculer Client Example
- * Demonstrates how to call the TTS microservice from another service/client
- * 
- * This example shows TWO modes:
- * 1. Standalone mode - Loads the TTS service directly (for testing)
- * 2. Client mode - Connects to a running server via transporter
- * 
+ * Libp2p TTS Client Example (Type-Safe with mDNS Discovery)
+ * Demonstrates how to call the TTS service via libp2p P2P networking
+ *
+ * This client connects directly to the server's libp2p node without using HTTP.
+ * It supports automatic discovery via multicast DNS (mDNS) on the local network.
+ *
+ * Usage:
+ *   - Start server with LIBP2P_ENABLED=true
+ *   - Run this client; it will discover the server via mDNS.
+ *   - Alternatively, set LIBP2P_SERVER to a specific multiaddr.
+ *
  * Run with: bun run examples/client.ts
  */
+// Define Language type (same as server)
+type Language = 'en' | 'ko' | 'es' | 'pt' | 'fr';
 
-import { ServiceBroker } from 'moleculer';
-import TTSService from '../src/services/tts.service.js';
+// SynthesisOptions (same as server)
+interface SynthesisOptions {
+  rate?: string;
+  volume?: string;
+  pitch?: string;
+}
 
-// Configuration: Set to true to connect to a running server
-// Set to false to load the TTS service directly (standalone mode)
-const CONNECT_TO_SERVER = false;
+// Protocol types
+interface SynthesizeParams {
+  text: string;
+  voice?: string;
+  filename?: string;
+  options?: SynthesisOptions;
+  language?: Language;
+  writeToFile?: boolean;
+}
 
-// Create broker configuration
-const brokerConfig = {
-    namespace: 'supertonic',
-    nodeID: `client-${process.pid}`,
-    
-    // Use NATS transporter to connect to remote server
-    // Set to null for standalone mode (services loaded locally)
-    transporter: process.env.TRANSPORTER || null,
-    
-    logger: {
-        type: 'Console',
-        options: { level: 'info' }
-    }
+interface SynthesizeMixedParams {
+  taggedText: string;
+  voice?: string;
+  filename?: string;
+  options?: SynthesisOptions;
+  silenceDuration?: number;
+  writeToFile?: boolean;
+}
+
+type TTSServiceMap = {
+  synthesize: { params: SynthesizeParams; result: { savedPath: string | null; audioBase64: string; detectedLanguage: Language } };
+  synthesizeMixed: { params: SynthesizeMixedParams; result: { savedPath: string | null; audioBase64: string } };
+  getVoices: { params: Record<string, never>; result: { voices: string[] } };
+  health: { params: Record<string, never>; result: { status: string; timestamp: string; libp2p: string } };
 };
 
-// Create the broker
-const broker = new ServiceBroker(brokerConfig);
+type TTSRequest<M extends keyof TTSServiceMap = keyof TTSServiceMap> = {
+  method: M;
+  params: TTSServiceMap[M]['params'];
+};
 
-// In standalone mode, load the TTS service directly
-if (!CONNECT_TO_SERVER) {
-    broker.createService(TTSService);
-    console.log('📦 Running in STANDALONE mode (TTS service loaded locally)');
-} else {
-    console.log('🌐 Running in CLIENT mode (connecting to remote server)');
-    console.log('   Make sure the server is running: bun start');
-    if (!process.env.TRANSPORTER) {
-        console.log('   ⚠️  Set TRANSPORTER env var for remote connection (e.g., TRANSPORTER=nats://localhost:4222)');
-    }
-}
+type TTSResponse<T = any> = 
+  | { success: true; result: T }
+  | { success: false; error: string };
 
 async function main() {
-    console.log('='.repeat(60));
-    console.log('MOLECULER TTS CLIENT EXAMPLE');
-    console.log('='.repeat(60));
+  // Dynamic imports to avoid requiring packages if not used
+  const { createLibp2p } = await import('libp2p');
+  const { tcp } = await import('@libp2p/tcp');
+  const { yamux } = await import('@chainsafe/libp2p-yamux');
+  const { noise } = await import('@chainsafe/libp2p-noise');
+  const { mdns } = await import('@libp2p/mdns');
 
-    // Start the broker
-    await broker.start();
-    console.log('\n✓ Client broker started\n');
+  // Resolve server address: use env var or mDNS discovery
+  const envAddr = process.env.LIBP2P_SERVER;
+  let serverMultiaddr: any;
+  let node: any;
 
+  if (envAddr) {
+    // Create libp2p node without mDNS when using direct address
+    node = await createLibp2p({
+      transports: [tcp()],
+      streamMuxers: [yamux()],
+      connectionEncrypters: [noise()],
+    });
+    await node.start();
+    console.log('Client libp2p node started');
+    console.log('Node ID:', node.peerId.toString());
+    serverMultiaddr = envAddr;
+    console.log(`Using LIBP2P_SERVER: ${serverMultiaddr}`);
+  } else {
+    // Create libp2p node with mDNS peer discovery
+    console.log('No LIBP2P_SERVER set, starting mDNS discovery...');
+    
+    node = await createLibp2p({
+      transports: [tcp()],
+      streamMuxers: [yamux()],
+      connectionEncrypters: [noise()],
+      peerDiscovery: [mdns()],
+    });
+
+    // Start the node BEFORE waiting for discovery events
+    await node.start();
+    console.log('Client libp2p node started');
+    console.log('Node ID:', node.peerId.toString());
+
+    // Wait for peer discovery via mDNS
     try {
-        // ============================================
-        // Example 1: Health Check
-        // ============================================
-        console.log('[1] Health Check:');
-        const health = await broker.call('tts.health') as { status: string; timestamp: string };
-        console.log('   Response:', health);
-        console.log('');
-
-        // ============================================
-        // Example 2: Get Available Voices
-        // ============================================
-        console.log('[2] Get Available Voices:');
-        const voices = await broker.call('tts.getVoices') as { voices: string[] };
-        console.log('   Available voices:', voices.voices.join(', '));
-        console.log('');
-
-        // ============================================
-        // Example 3: Synthesize Text (English)
-        // ============================================
-        console.log('[3] Synthesize English Text:');
-        const result1 = await broker.call('tts.synthesize', {
-            text: 'Hello, this is a test of the Moleculer TTS service.',
-            voice: 'F1',
-            filename: 'moleculer_test_en',
-            options: { rate: '0%' },
-            writeToFile: true
-        }) as { success: boolean; savedPath: string | null; audioBase64: string; detectedLanguage: string };
+      const discovered = await new Promise<any>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('mDNS discovery timeout after 15s')), 15000);
         
-        console.log('   ✓ Success!');
-        console.log('   Saved to:', result1.savedPath);
-        console.log('   Detected language:', result1.detectedLanguage);
-        console.log('   Audio size (base64):', result1.audioBase64.length, 'characters');
-        console.log('');
-
-        // ============================================
-        // Example 4: Synthesize Text (Spanish)
-        // ============================================
-        console.log('[4] Synthesize Spanish Text:');
-        const result2 = await broker.call('tts.synthesize', {
-            text: 'Hola, este es un ejemplo en español usando Moleculer.',
-            voice: 'M1',
-            filename: 'moleculer_test_es',
-            options: { rate: '+10%' },
-            language: 'es',  // Explicit language
-            writeToFile: true
-        }) as { success: boolean; savedPath: string | null; audioBase64: string; detectedLanguage: string };
-        
-        console.log('   ✓ Success!');
-        console.log('   Saved to:', result2.savedPath);
-        console.log('   Detected language:', result2.detectedLanguage);
-        console.log('');
-
-        // ============================================
-        // Example 5: Synthesize Mixed-Language Text
-        // ============================================
-        console.log('[5] Synthesize Mixed-Language Text:');
-        const mixedText = '<en>Hello and welcome</en><es>Bienvenidos a todos</es><en>Thank you</en>';
-        const result3 = await broker.call('tts.synthesizeMixed', {
-            taggedText: mixedText,
-            voice: 'F2',
-            filename: 'moleculer_test_mixed',
-            options: { rate: '0%' },
-            silenceDuration: 0.5,
-            writeToFile: true
-        }) as { success: boolean; savedPath: string | null; audioBase64: string };
-        
-        console.log('   ✓ Success!');
-        console.log('   Saved to:', result3.savedPath);
-        console.log('   Audio size (base64):', result3.audioBase64.length, 'characters');
-        console.log('');
-
-        // ============================================
-        // Example 6: Using Context and Metadata
-        // ============================================
-        console.log('[6] Using Context and Metadata:');
-        const result4 = await broker.call(
-            'tts.synthesize',
-            {
-                text: 'Context example with metadata',
-                voice: 'F3',
-                filename: 'moleculer_test_context'
-            },
-            {
-                meta: {
-                    userId: 'user-123',
-                    requestId: 'req-456'
-                },
-                timeout: 60000 // 60 second timeout
-            }
-        ) as { success: boolean; detectedLanguage: string };
-        
-        console.log('   ✓ Success with context!');
-        console.log('   Detected language:', result4.detectedLanguage);
-        console.log('');
-
-        // ============================================
-        // Example 7: Error Handling
-        // ============================================
-        console.log('[7] Error Handling Example:');
-        try {
-            await broker.call('tts.synthesize', {
-                text: '', // Empty text should fail
-                voice: 'F1',
-                filename: 'error_test'
-            });
-        } catch (error: any) {
-            console.log('   Expected error caught:', error.message || error.type);
-        }
-        console.log('');
-
-        // ============================================
-        // Example 8: Event-based Communication
-        // ============================================
-        console.log('[8] Event-based Communication:');
-        console.log('   In Moleculer, events are handled via services.');
-        console.log('   To listen for events, create a service with event handlers:');
-        console.log('');
-        console.log('   broker.createService({');
-        console.log('       name: "listener",');
-        console.log('       events: {');
-        console.log('           "tts.synthesis.started"(payload) {');
-        console.log('               this.logger.info("Synthesis started:", payload);');
-        console.log('           },');
-        console.log('           "tts.synthesis.completed"(payload) {');
-        console.log('               this.logger.info("Synthesis completed:", payload);');
-        console.log('           }');
-        console.log('       }');
-        console.log('   });');
-        console.log('');
-
-        // ============================================
-        // Summary
-        // ============================================
-        console.log('='.repeat(60));
-        console.log('EXAMPLES COMPLETED SUCCESSFULLY!');
-        console.log('Generated files are in the ./output directory');
-        console.log('='.repeat(60));
-
-    } catch (error) {
-        console.error('\n❌ Error:', error);
-    } finally {
-        // Stop the broker
-        await broker.stop();
-        console.log('\n✓ Client broker stopped');
+        node.addEventListener('peer:discovery', (event: any) => {
+          const peer = event.detail;
+          console.log(`Discovered peer via mDNS: ${peer.id.toString()}`);
+          // Check if peer has addresses
+          if (peer.multiaddrs && peer.multiaddrs.length > 0) {
+            clearTimeout(timeout);
+            resolve(peer);
+          }
+        });
+      });
+      
+      serverMultiaddr = discovered.multiaddrs[0];
+      console.log(`Using discovered server: ${serverMultiaddr}`);
+    } catch (error: any) {
+      console.error('Discovery failed:', error.message);
+      await node.stop();
+      process.exit(1);
     }
+  }
+
+  try {
+    console.log(`Connecting to server: ${serverMultiaddr}`);
+    await node.dial(serverMultiaddr as any);
+    console.log('Connected to server');
+
+    // Typed helper function
+    async function callTTSService<M extends keyof TTSServiceMap>(method: M, params: TTSServiceMap[M]['params']): Promise<TTSServiceMap[M]['result']> {
+      const stream = await node.newStream(serverMultiaddr as any, ['/tts/1.0.0']);
+      try {
+        // Send request
+        const request = JSON.stringify({ method, params }) + '\n';
+        await stream.write(Buffer.from(request));
+
+        // Read response: accumulate until newline
+        let buffer = Buffer.alloc(0);
+        let responseText: string | null = null;
+        while (true) {
+          const chunk = await stream.read();
+          if (chunk === null) break; // EOF
+          buffer = Buffer.concat([buffer, Buffer.from(chunk)]);
+          const newlineIndex = buffer.indexOf(10); // '\n'
+          if (newlineIndex !== -1) {
+            responseText = buffer.toString('utf8', 0, newlineIndex);
+            break;
+          }
+        }
+        if (!responseText) {
+          throw new Error('No response from server');
+        }
+        const response = JSON.parse(responseText) as TTSResponse<TTSServiceMap[M]['result']>;
+        if (response.success) {
+          return response.result;
+        } else {
+          throw new Error(response.error);
+        }
+      } finally {
+        stream.close();
+      }
+    }
+
+    // Examples
+    console.log('\n[1] Health Check:');
+    const health = await callTTSService('health', {});
+    console.log('   Response:', health);
+    console.log('');
+
+    console.log('[2] Get Available Voices:');
+    const voices = await callTTSService('getVoices', {});
+    console.log('   Available voices:', voices.voices.join(', '));
+    console.log('');
+
+    console.log('[3] Synthesize English Text:');
+    const result1 = await callTTSService('synthesize', {
+      text: 'Hello, this is a test of the Libp2p TTS service.',
+      voice: 'F1',
+      filename: 'libp2p_test_en',
+      options: { rate: '0%' },
+      writeToFile: true
+    });
+    console.log('   ✓ Success!');
+    console.log('   Saved to:', result1.savedPath);
+    console.log('   Detected language:', result1.detectedLanguage);
+    console.log('   Audio size (base64):', result1.audioBase64.length, 'characters');
+    console.log('');
+
+    console.log('[4] Synthesize Spanish Text:');
+    const result2 = await callTTSService('synthesize', {
+      text: 'Hola, este es un ejemplo en español usando Libp2p.',
+      voice: 'M1',
+      filename: 'libp2p_test_es',
+      options: { rate: '+10%' },
+      language: 'es',
+      writeToFile: true
+    });
+    console.log('   ✓ Success!');
+    console.log('   Saved to:', result2.savedPath);
+    console.log('   Detected language:', result2.detectedLanguage);
+    console.log('');
+
+    console.log('[5] Synthesize Mixed-Language Text:');
+    const mixedText = '<en>Hello and welcome</en><es>Bienvenidos a todos</es><en>Thank you</en>';
+    const result3 = await callTTSService('synthesizeMixed', {
+      taggedText: mixedText,
+      voice: 'F2',
+      filename: 'libp2p_test_mixed',
+      options: { rate: '0%' },
+      silenceDuration: 0.5,
+      writeToFile: true
+    });
+    console.log('   ✓ Success!');
+    console.log('   Saved to:', result3.savedPath);
+    console.log('   Audio size (base64):', result3.audioBase64.length, 'characters');
+    console.log('');
+
+    console.log('[6] Using Context and Metadata:');
+    console.log('   (Not supported in this simple protocol)');
+    console.log('');
+
+    console.log('[7] Error Handling Example:');
+    try {
+      await callTTSService('synthesize', {
+        text: '',
+        voice: 'F1',
+        filename: 'error_test'
+      });
+    } catch (error: any) {
+      console.log('   Expected error caught:', error.message);
+    }
+    console.log('');
+
+    console.log('='.repeat(60));
+    console.log('EXAMPLES COMPLETED SUCCESSFULLY!');
+    console.log('Generated files are in the ./output directory (on server)');
+    console.log('='.repeat(60));
+
+  } catch (error) {
+    console.error('\n❌ Error:', error);
+  } finally {
+    await node.stop();
+    console.log('\n✓ Client libp2p node stopped');
+  }
 }
 
-// Run the examples
 main().catch(console.error);

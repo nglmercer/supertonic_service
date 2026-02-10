@@ -7,6 +7,38 @@
 import { TTSService } from './tts/service.js';
 import type { LanguageDetector, LanguageDetectionResult } from './tts/service.js';
 import type { Language, SynthesisOptions } from './tts/types.js';
+import type { Libp2p } from 'libp2p';
+
+// Libp2p TTS protocol types
+type TTSMethod = 'synthesize' | 'synthesizeMixed' | 'getVoices' | 'health';
+
+interface SynthesizeParams {
+  text: string;
+  voice?: string;
+  filename?: string;
+  options?: SynthesisOptions;
+  language?: Language;
+  writeToFile?: boolean;
+}
+
+interface SynthesizeMixedParams {
+  taggedText: string;
+  voice?: string;
+  filename?: string;
+  options?: SynthesisOptions;
+  silenceDuration?: number;
+  writeToFile?: boolean;
+}
+
+type TTSRequest =
+  | { method: 'synthesize'; params: SynthesizeParams }
+  | { method: 'synthesizeMixed'; params: SynthesizeMixedParams }
+  | { method: 'getVoices'; params: Record<string, never> }
+  | { method: 'health'; params: Record<string, never> };
+
+type TTSResponse<T = any> =
+  | { success: true; result: T }
+  | { success: false; error: string };
 
 // Environment configuration
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
@@ -31,13 +63,16 @@ async function initLibp2p() {
         const { tcp } = await import('@libp2p/tcp');
         const { yamux } = await import('@chainsafe/libp2p-yamux');
         const { noise } = await import('@chainsafe/libp2p-noise');
-        const node = await createLibp2p({
+        const { mdns } = await import('@libp2p/mdns');
+        
+        const node: Libp2p = await createLibp2p({
             addresses: {
                 listen: [`/ip4/0.0.0.0/tcp/${LIBP2P_PORT}`]
             },
             transports: [tcp()],
             streamMuxers: [yamux()],
             connectionEncrypters: [noise()],
+            peerDiscovery: [mdns()],
         });
 
         node.addEventListener('peer:connect', (event: any) => {
@@ -49,6 +84,99 @@ async function initLibp2p() {
         });
 
         await node.start();
+
+        // Register TTS protocol handler for libp2p
+        node.handle('/tts/1.0.0', async (stream: any) => {
+            try {
+                // Read request: accumulate data until newline
+                let buffer = Buffer.alloc(0);
+                let requestText: string | null = null;
+                while (true) {
+                    const chunk = await stream.read();
+                    if (chunk === null) break; // EOF
+                    buffer = Buffer.concat([buffer, Buffer.from(chunk)]);
+                    const newlineIndex = buffer.indexOf(10); // '\n'
+                    if (newlineIndex !== -1) {
+                        requestText = buffer.toString('utf8', 0, newlineIndex);
+                        break;
+                    }
+                }
+                if (!requestText) {
+                    // No complete line received
+                    await stream.write(Buffer.from(JSON.stringify({ success: false, error: 'Invalid request' }) + '\n'));
+                    stream.close();
+                    return;
+                }
+
+                let response: any = { success: false };
+                try {
+                    const request = JSON.parse(requestText) as TTSRequest;
+                    switch (request.method) {
+                        case 'synthesize': {
+                            const { text, voice = DEFAULT_VOICE, filename = 'output', options = {}, language, writeToFile = false } = request.params;
+                            if (!text) throw new Error('Missing required parameter: text');
+                            const result = await ttsService.synthesize(text, voice, filename, options, language, writeToFile);
+                            response = {
+                                success: true,
+                                result: {
+                                    savedPath: result.savedPath,
+                                    audioBase64: result.fileBuffer.toString('base64'),
+                                    detectedLanguage: result.detectedLanguage,
+                                }
+                            };
+                            break;
+                        }
+                        case 'synthesizeMixed': {
+                            const { taggedText, voice = DEFAULT_VOICE, filename = 'output', options = {}, silenceDuration = 0.3, writeToFile = false } = request.params;
+                            if (!taggedText) throw new Error('Missing required parameter: taggedText');
+                            const result = await ttsService.synthesizeMixed(taggedText, voice, filename, options, silenceDuration, writeToFile);
+                            response = {
+                                success: true,
+                                result: {
+                                    savedPath: result.savedPath,
+                                    audioBase64: result.fileBuffer.toString('base64'),
+                                }
+                            };
+                            break;
+                        }
+                        case 'getVoices': {
+                            const voices = await ttsService.getVoices();
+                            response = {
+                                success: true,
+                                result: { voices }
+                            };
+                            break;
+                        }
+                        case 'health': {
+                            response = {
+                                success: true,
+                                result: {
+                                    status: 'ok',
+                                    timestamp: new Date().toISOString(),
+                                    libp2p: 'enabled'
+                                }
+                            };
+                            break;
+                        }
+                        default:
+                            throw new Error(`Unknown method: ${(request as any).method}`);
+                    }
+                } catch (error: any) {
+                    response = {
+                        success: false,
+                        error: error.message || 'Internal Server Error'
+                    };
+                }
+
+                // Write response as JSON with newline
+                const responseBuffer = Buffer.from(JSON.stringify(response) + '\n');
+                await stream.write(responseBuffer);
+                stream.close();
+            } catch (error) {
+                console.error('Error handling libp2p TTS protocol:', error);
+            }
+        });
+
 
         console.log('='.repeat(60));
         console.log('Libp2p node started');
@@ -194,13 +322,14 @@ async function main() {
     console.log('Supertonic TTS Service Starting...');
     console.log('='.repeat(60));
 
+    // Initialize TTS service first (before libp2p) to ensure it's ready for P2P requests
+    initTTSService();
+
     if (LIBP2P_ENABLED) {
         libp2pNode = await initLibp2p();
     } else {
         console.log('Libp2p disabled (set LIBP2P_ENABLED=true to enable P2P networking)');
     }
-
-    initTTSService();
 
     const server = Bun.serve({
         port: PORT,
