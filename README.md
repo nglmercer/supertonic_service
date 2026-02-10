@@ -1,145 +1,259 @@
-# TTS ONNX Inference Examples
+# Supertonic TTS API
 
-This guide provides examples for running TTS inference using `example_onnx.py`.
+FastAPI-based REST API for Supertonic Text-to-Speech synthesis with multilingual support.
 
-## 📰 Update News
+## Features
 
-**2026.01.06** - 🎉 **Supertonic 2** released with multilingual support! Now supports English (`en`), Korean (`ko`), Spanish (`es`), Portuguese (`pt`), and French (`fr`). [Demo](https://huggingface.co/spaces/Supertone/supertonic-2) | [Models](https://huggingface.co/Supertone/supertonic-2)
+- 🎵 **Text-to-Speech** - Convert text to natural-sounding speech
+- 🌐 **Multilingual** - Supports English, Korean, Spanish, Portuguese, French
+- 🎭 **Multiple Voices** - 10 voice styles (M1-M5, F1-F5)
+- ⚡ **High Performance** - Fast synthesis with quality options
+- 💾 **Cache Management** - Auto-cleanup of old audio files
+- 🔄 **Flexible Output** - Save to file or get base64-encoded audio
 
-**2025.12.10** - Added `supertonic` PyPI package! Install via `pip install supertonic` for a streamlined experience. This is a separate usage method from the ONNX examples in this directory. For more details, visit [supertonic-py documentation](https://supertone-inc.github.io/supertonic-py) and see `example_pypi.py` for usage.
+## Requirements
 
-**2025.12.10** - Added [6 new voice styles](https://huggingface.co/Supertone/supertonic/tree/b10dbaf18b316159be75b34d24f740008fddd381) (M3, M4, M5, F3, F4, F5). See [Voices](https://supertone-inc.github.io/supertonic-py/voices/) for details
-
-**2025.12.08** - Optimized ONNX models via [OnnxSlim](https://github.com/inisis/OnnxSlim) now available on [Hugging Face Models](https://huggingface.co/Supertone/supertonic)
-
-**2025.11.23** - Enhanced text preprocessing with comprehensive normalization, emoji removal, symbol replacement, and punctuation handling for improved synthesis quality.
-
-**2025.11.19** - Added `--speed` parameter to control speech synthesis speed. Adjust the speed factor to make speech faster or slower while maintaining natural quality.
-
-**2025.11.19** - Added automatic text chunking for long-form inference. Long texts are split into chunks and synthesized with natural pauses.
+- Python 3.8+
+- supertonic (installed automatically)
+- fastapi
+- uvicorn
 
 ## Installation
 
-This project uses [uv](https://docs.astral.sh/uv/) for fast package management.
-
-### Install uv (if not already installed)
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+pip install supertonic fastapi uvicorn requests
 ```
 
-### Install dependencies
+## Quick Start
+
+### 1. Start the Server
+
 ```bash
-uv sync
+python -m uvicorn src.server:app --host 0.0.0.0 --port 8000
 ```
 
-Or if you prefer using traditional pip with requirements.txt:
+Or use the run script:
+
 ```bash
-pip install -r requirements.txt
+python test_api.py
 ```
 
-## Basic Usage
+### 2. Use the API
 
-### Example 1: Default Inference
-Run inference with default settings:
+**Health Check:**
 ```bash
-uv run example_onnx.py
+curl http://localhost:8000/health
 ```
 
-This will use:
-- Voice style: `assets/voice_styles/M1.json`
-- Text: "This morning, I took a walk in the park, and the sound of the birds and the breeze was so pleasant that I stopped for a long time just to listen."
-- Output directory: `results/`
-- Total steps: 5
-- Number of generations: 4
-
-### Example 2: Batch Inference
-Process multiple voice styles and texts at once:
+**List Voices:**
 ```bash
-uv run example_onnx.py \
-  --voice-style assets/voice_styles/M1.json assets/voice_styles/F1.json \
-  --text "The sun sets behind the mountains, painting the sky in shades of pink and orange." "오늘 아침에 공원을 산책했는데, 새소리와 바람 소리가 너무 좋아서 한참을 멈춰 서서 들었어요." \
-  --lang en ko \
-  --batch
+curl http://localhost:8000/voices
 ```
 
-This will:
-- Use `--batch` flag to enable batch processing mode
-- Generate speech for 2 different voice-text pairs
-- Use male voice style (M1.json) for the first English text
-- Use female voice style (F1.json) for the second Korean text
-- Process both samples in a single batch (automatic text chunking disabled)
-
-### Example 3: High Quality Inference
-Increase denoising steps for better quality:
+**Synthesize Audio (save to file):**
 ```bash
-uv run example_onnx.py \
-  --total-step 10 \
-  --voice-style assets/voice_styles/M1.json \
-  --text "Increasing the number of denoising steps improves the output's fidelity and overall quality."
+curl -X POST http://localhost:8000/synthesize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello world! This is Supertonic TTS.",
+    "voice": "M1",
+    "language": "en",
+    "save_to_file": true
+  }'
 ```
 
-This will:
-- Use 10 denoising steps instead of the default 5
-- Produce higher quality output at the cost of slower inference
-
-### Example 4: Long-Form Inference
-For long texts, the system automatically chunks the text into manageable segments and generates a single audio file:
+**Synthesize Audio (get base64 data):**
 ```bash
-uv run example_onnx.py \
-  --voice-style assets/voice_styles/M1.json \
-  --text "Once upon a time, in a small village nestled between rolling hills, there lived a young artist named Clara. Every morning, she would wake up before dawn to capture the first light of day. The golden rays streaming through her window inspired countless paintings. Her work was known throughout the region for its vibrant colors and emotional depth. People from far and wide came to see her gallery, and many said her paintings could tell stories that words never could."
+curl -X POST http://localhost:8000/synthesize/bytes \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hola mundo! Esta es Supertonic TTS.",
+    "voice": "F1",
+    "language": "es"
+  }'
 ```
 
-This will:
-- Automatically split the long text into smaller chunks (max 300 characters by default)
-- Process each chunk separately while maintaining natural speech flow
-- Insert brief silences (0.3 seconds) between chunks for natural pacing
-- Combine all chunks into a single output audio file
+## API Endpoints
 
-**Note**: When using batch mode (`--batch`), automatic text chunking is disabled. Use non-batch mode for long-form text synthesis.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | API information |
+| GET | `/health` | Health check |
+| GET | `/voices` | List available voices |
+| GET | `/languages` | List supported languages |
+| POST | `/validate` | Validate text before synthesis |
+| POST | `/synthesize` | Synthesize audio (file mode) |
+| POST | `/synthesize/bytes` | Synthesize audio (base64 mode) |
+| GET | `/synthesize/file/{filename}` | Get saved audio file |
+| GET | `/cache` | Get cache information |
+| POST | `/cache/cleanup` | Trigger cache cleanup |
+| GET | `/voices/{key}/info` | Get voice information |
+| GET | `/examples/texts` | Get example texts |
 
-### Example 5: Adjusting Speech Speed
-Control the speed of speech synthesis:
-```bash
-# Faster speech (speed > 1.0)
-uv run example_onnx.py \
-  --voice-style assets/voice_styles/F2.json \
-  --text "This text will be synthesized at a faster pace." \
-  --speed 1.2
+## Request/Response Examples
 
-# Slower speech (speed < 1.0)
-uv run example_onnx.py \
-  --voice-style assets/voice_styles/M2.json \
-  --text "This text will be synthesized at a slower, more deliberate pace." \
-  --speed 0.9
+### Synthesis Request (File Mode)
+
+```json
+POST /synthesize
+{
+  "text": "Hello world!",
+  "voice": "M1",
+  "language": "en",
+  "speed": 1.0,
+  "quality": "balanced",
+  "save_to_file": true,
+  "output_path": null
+}
 ```
 
-This will:
-- Use `--speed 1.2` to generate faster speech
-- Use `--speed 0.9` to generate slower speech
-- Default speed is 1.05 if not specified
-- Recommended speed range is between 0.9 and 1.5 for natural-sounding results
+### Synthesis Response (File Mode)
 
-## Available Arguments
+```json
+{
+  "success": true,
+  "message": "Audio synthesized successfully",
+  "audio_path": "outputs/synthesize/tts_en_M1_abc123.wav",
+  "duration": 4.12,
+  "language": "en",
+  "voice": "M1",
+  "text_length": 12
+}
+```
 
-| Argument | Type | Default | Description |
-|----------|------|---------|-------------|
-| `--use-gpu` | flag | False | Use GPU for inference (with CPU fallback) |
-| `--onnx-dir` | str | `assets/onnx` | Path to ONNX model directory |
-| `--total-step` | int | 5 | Number of denoising steps (higher = better quality, slower) |
-| `--speed` | float | 1.05 | Speech speed factor (higher = faster, lower = slower) |
-| `--n-test` | int | 4 | Number of times to generate each sample |
-| `--voice-style` | str+ | `assets/voice_styles/M1.json` | Voice style file path(s) |
-| `--text` | str+ | (long default text) | Text(s) to synthesize |
-| `--lang` | str+ | `en` | Language(s) for text(s): `en`, `ko`, `es`, `pt`, `fr` |
-| `--save-dir` | str | `results` | Output directory |
-| `--batch` | flag | False | Enable batch mode (disables automatic text chunking) |
+### Synthesis Request (Bytes Mode)
 
-## Notes
+```json
+POST /synthesize/bytes
+{
+  "text": "Hello world!",
+  "voice": "M1",
+  "language": "en",
+  "speed": 1.0,
+  "quality": "balanced"
+}
+```
 
-- **Batch Processing**: The number of `--voice-style` files must match the number of `--text` entries
-- **Multilingual Support**: Use `--lang` to specify language(s). Available: `en` (English), `ko` (Korean), `es` (Spanish), `pt` (Portuguese), `fr` (French)
-- **Long-Form Inference**: Without `--batch` flag, long texts are automatically chunked and combined into a single audio file with natural pauses
-- **Quality vs Speed**: Higher `--total-step` values produce better quality but take longer
-- **GPU Support**: GPU mode is not supported yet
+### Synthesis Response (Bytes Mode)
 
+```json
+{
+  "success": true,
+  "message": "Audio synthesized successfully",
+  "duration": 4.12,
+  "language": "en",
+  "voice": "M1",
+  "text_length": 12,
+  "audio_format": "wav",
+  "sample_rate": 44100,
+  "audio_data": "UklGRi... (base64 encoded audio)"
+}
+```
+
+## Python Client Example
+
+```python
+import requests
+import base64
+
+SERVER_URL = "http://localhost:8000"
+
+def synthesize(text, voice="M1", language="en"):
+    """Synthesize text and save to file."""
+    response = requests.post(f"{SERVER_URL}/synthesize", json={
+        "text": text,
+        "voice": voice,
+        "language": language,
+        "save_to_file": True
+    })
+    return response.json()
+
+def synthesize_bytes(text, voice="M1", language="en"):
+    """Synthesize text and return base64 data."""
+    response = requests.post(f"{SERVER_URL}/synthesize/bytes", json={
+        "text": text,
+        "voice": voice,
+        "language": language
+    })
+    data = response.json()
+    
+    # Save base64 audio to file
+    audio_bytes = base64.b64decode(data["audio_data"])
+    with open("output.wav", "wb") as f:
+        f.write(audio_bytes)
+    
+    return data
+
+# Usage
+result = synthesize("Hello world!", voice="M1", language="en")
+print(f"Audio saved to: {result['audio_path']}")
+
+synthesize_bytes("Hola mundo!", voice="F1", language="es")
+```
+
+## Configuration
+
+### Cache Settings
+
+Edit `src/server.py` to configure cache:
+
+```python
+CACHE_DIR = Path("outputs/synthesize")
+CACHE_MAX_SIZE_MB = 100  # Max cache size in MB
+CACHE_MAX_FILES = 50  # Max number of files
+CACHE_MAX_AGE_HOURS = 24  # Max age in hours
+```
+
+### Default Synthesis Options
+
+```python
+class SynthesizeRequest:
+    text: str = Field(..., min_length=1, max_length=10000)
+    voice: str = "M1"  # M1-M5, F1-F5
+    language: str = "en"  # en, ko, es, pt, fr
+    speed: float = Field(1.0, ge=0.5, le=2.0)
+    quality: str = "balanced"  # fast, balanced, high, ultra
+    total_steps: int = None  # Auto-set by quality
+    max_chunk_length: int = 300
+    silence_duration: float = Field(0.3, ge=0.1, le=2.0)
+    save_to_file: bool = True
+    output_path: str = None
+```
+
+## Running Tests
+
+```bash
+# Run the test script (starts server, runs tests, stops server)
+python test_api.py
+```
+
+## Project Structure
+
+```
+supertonic/
+├── src/
+│   ├── server.py       # FastAPI server with REST endpoints
+│   └── core/           # Core module (enums, models, validation)
+├── outputs/
+│   └── synthesize/     # Audio cache directory
+├── test_api.py         # Test script
+├── README.md           # This file
+└── requirements.txt     # Python dependencies
+```
+
+## Dependencies
+
+- `supertonic>=1.1.0` - TTS library
+- `fastapi>=0.100.0` - Web framework
+- `uvicorn>=0.22.0` - ASGI server
+- `requests>=2.31.0` - HTTP client
+- `pydantic>=2.0` - Data validation
+
+## License
+
+MIT License
+
+## References
+
+- [Supertonic TTS](https://github.com/supertonic-ai/supertonic)
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)

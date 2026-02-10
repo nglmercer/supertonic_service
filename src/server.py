@@ -7,7 +7,12 @@ Provides OpenAPI/Swagger documentation at /docs.
 
 import os
 import sys
+import time
+import glob
+import base64
+import tempfile
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -26,13 +31,18 @@ from src.core import (
     validate_voice,
     wrap_with_language_tags,
     ExampleTexts,
-    OutputPaths,
     get_voice_file,
     get_voice_url,
 )
 
 # Lazy import supertonic to avoid startup issues
 _tts_instance = None
+
+# Cache configuration
+CACHE_DIR = Path("outputs/synthesize")
+CACHE_MAX_SIZE_MB = 100  # Max cache size in MB
+CACHE_MAX_FILES = 50  # Max number of files to keep
+CACHE_MAX_AGE_HOURS = 24  # Max age of files in hours
 
 
 def get_tts():
@@ -44,11 +54,78 @@ def get_tts():
     return _tts_instance
 
 
+def cleanup_cache():
+    """Clean up old cache files based on size and age limits."""
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        
+        # Get all wav files with their modified times
+        files = []
+        for f in CACHE_DIR.glob("*.wav"):
+            stat = f.stat()
+            files.append({
+                "path": f,
+                "mtime": datetime.fromtimestamp(stat.st_mtime),
+                "size": stat.st_size
+            })
+        
+        # Sort by modification time (oldest first)
+        files.sort(key=lambda x: x["mtime"])
+        
+        # Calculate current size
+        total_size = sum(f["size"] for f in files)
+        total_size_mb = total_size / (1024 * 1024)
+        
+        # Remove old files if over limits
+        files_to_remove = []
+        
+        # Check size limit
+        if total_size_mb > CACHE_MAX_SIZE_MB:
+            for f in files:
+                if total_size_mb <= CACHE_MAX_SIZE_MB:
+                    break
+                total_size_mb -= f["size"] / (1024 * 1024)
+                files_to_remove.append(f)
+        
+        # Check file count limit
+        if len(files) - len(files_to_remove) > CACHE_MAX_FILES:
+            remaining = CACHE_MAX_FILES
+            for f in files:
+                if remaining <= 0:
+                    files_to_remove.append(f)
+                else:
+                    remaining -= 1
+        
+        # Check age limit
+        cutoff = datetime.now() - timedelta(hours=CACHE_MAX_AGE_HOURS)
+        for f in files:
+            if f["mtime"] < cutoff:
+                files_to_remove.append(f)
+        
+        # Remove files
+        for f in files_to_remove:
+            try:
+                f["path"].unlink()
+            except OSError:
+                pass
+        
+        if files_to_remove:
+            print(f"🧹 Cleaned up {len(files_to_remove)} old cache files")
+            
+    except Exception as e:
+        print(f"⚠ Cache cleanup failed: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """ lifespan context manager for startup/shutdown events."""
+    """Lifespan context manager for startup/shutdown events."""
     # Startup
     print("🚀 Starting Supertonic TTS API Server...")
+    print(f"📁 Cache config: max={CACHE_MAX_SIZE_MB}MB, max_files={CACHE_MAX_FILES}, max_age={CACHE_MAX_AGE_HOURS}h")
+    
+    # Initial cleanup
+    cleanup_cache()
+    
     try:
         tts = get_tts()
         print(f"✓ TTS initialized with voices: {tts.voice_style_names}")
@@ -63,7 +140,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Supertonic TTS API",
     description="REST API for Supertonic Text-to-Speech synthesis with multilingual support.",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
@@ -90,19 +167,15 @@ class SynthesizeRequest(BaseModel):
     total_steps: Optional[int] = Field(default=None, description="Synthesis steps (3, 5, 10, 15)")
     max_chunk_length: Optional[int] = Field(default=300, description="Max chunk length for long text")
     silence_duration: float = Field(default=0.3, ge=0.1, le=2.0, description="Silence between chunks")
-    verbose: bool = Field(default=False, description="Enable verbose logging")
-
-
-class VoiceStyleRequest(BaseModel):
-    """Request model for custom voice style."""
-    style_data: dict = Field(..., description="Voice style parameters")
+    save_to_file: bool = Field(default=True, description="Save audio to file and return path")
+    output_path: Optional[str] = Field(default=None, description="Custom output path (relative or absolute)")
 
 
 # ============== Response Models ==============
 
 
 class SynthesisResponse(BaseModel):
-    """Response model for synthesis endpoint."""
+    """Response model for synthesis endpoint (file mode)."""
     success: bool
     message: str
     audio_path: Optional[str] = None
@@ -110,6 +183,28 @@ class SynthesisResponse(BaseModel):
     language: str
     voice: str
     text_length: int
+
+
+class AudioDataResponse(BaseModel):
+    """Response model for synthesis endpoint (data mode)."""
+    success: bool
+    message: str
+    duration: Optional[float] = None
+    language: str
+    voice: str
+    text_length: int
+    audio_format: str
+    sample_rate: int
+    audio_data: str  # Base64 encoded audio
+
+
+class CacheInfoResponse(BaseModel):
+    """Response model for cache info endpoint."""
+    file_count: int
+    total_size_mb: float
+    max_size_mb: int
+    max_files: int
+    max_age_hours: int
 
 
 class VoiceListResponse(BaseModel):
@@ -144,6 +239,38 @@ def validate_and_prepare_text(text: str, language: str) -> tuple[str, str]:
     return tagged_text, lang.value
 
 
+def get_output_path(voice: str, language: str, custom_path: Optional[str] = None) -> Path:
+    """Get output path for audio file."""
+    if custom_path:
+        path = Path(custom_path)
+        # If relative, make it relative to CACHE_DIR
+        if not path.is_absolute():
+            path = CACHE_DIR / path
+    else:
+        # Generate filename
+        import hashlib
+        timestamp = int(time.time())
+        text_hash = hashlib.md5(f"{timestamp}".encode()).hexdigest()[:8]
+        path = CACHE_DIR / f"tts_{language}_{voice}_{text_hash}.wav"
+    
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_cache_info() -> dict:
+    """Get cache directory information."""
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    files = list(CACHE_DIR.glob("*.wav"))
+    total_size = sum(f.stat().st_size for f in files)
+    return {
+        "file_count": len(files),
+        "total_size_mb": total_size / (1024 * 1024),
+        "max_size_mb": CACHE_MAX_SIZE_MB,
+        "max_files": CACHE_MAX_FILES,
+        "max_age_hours": CACHE_MAX_AGE_HOURS
+    }
+
+
 # ============== API Endpoints ==============
 
 
@@ -152,15 +279,17 @@ async def root():
     """Root endpoint with API information."""
     return {
         "name": "Supertonic TTS API",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "docs": "/docs",
         "health": "/health",
         "endpoints": {
             "synthesize": "POST /synthesize",
-            "synthesize_file": "POST /synthesize/file",
+            "synthesize_bytes": "POST /synthesize/bytes",
             "voices": "GET /voices",
             "languages": "GET /languages",
             "validate": "POST /validate",
+            "cache": "GET /cache",
+            "cache_cleanup": "POST /cache/cleanup",
             "health": "GET /health",
         }
     }
@@ -225,11 +354,12 @@ async def validate_text(request: SynthesizeRequest):
 
 
 @app.post("/synthesize", response_model=SynthesisResponse, tags=["Synthesis"])
-async def synthesize(request: SynthesizeRequest):
+async def synthesize(request: SynthesizeRequest, background_tasks: BackgroundTasks):
     """
     Synthesize text to speech.
     
-    Returns JSON with audio file path. Audio files are saved to outputs/synthesize/.
+    By default, saves audio to file and returns path. Set `save_to_file=false` 
+    to use `/synthesize/bytes` for direct audio data.
     """
     try:
         # Validate inputs
@@ -261,30 +391,35 @@ async def synthesize(request: SynthesizeRequest):
             total_steps=steps,
             max_chunk_length=request.max_chunk_length,
             silence_duration=request.silence_duration,
-            verbose=request.verbose
         )
         
-        # Create output directory
-        output_dir = Path("outputs/synthesize")
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Generate filename
-        import hashlib
-        text_hash = hashlib.md5(request.text.encode()).hexdigest()[:8]
-        output_path = output_dir / f"tts_{lang_value}_{request.voice}_{text_hash}.wav"
-        
-        # Save audio
-        tts.save_audio(wav, str(output_path))
-        
-        return SynthesisResponse(
-            success=True,
-            message="Audio synthesized successfully",
-            audio_path=str(output_path),
-            duration=duration[0],
-            language=lang_value,
-            voice=request.voice.upper(),
-            text_length=len(request.text)
-        )
+        if request.save_to_file:
+            # Save to file
+            output_path = get_output_path(request.voice.upper(), lang_value, request.output_path)
+            tts.save_audio(wav, str(output_path))
+            
+            # Schedule cleanup
+            background_tasks.add_task(cleanup_cache)
+            
+            return SynthesisResponse(
+                success=True,
+                message="Audio synthesized successfully",
+                audio_path=str(output_path),
+                duration=duration[0],
+                language=lang_value,
+                voice=request.voice.upper(),
+                text_length=len(request.text)
+            )
+        else:
+            # Let the user handle it - return basic info
+            return SynthesisResponse(
+                success=True,
+                message="Audio synthesized successfully (use /synthesize/bytes for data)",
+                duration=duration[0],
+                language=lang_value,
+                voice=request.voice.upper(),
+                text_length=len(request.text)
+            )
         
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -292,59 +427,107 @@ async def synthesize(request: SynthesizeRequest):
         raise HTTPException(status_code=500, detail=f"Synthesis failed: {str(e)}")
 
 
-@app.post("/synthesize/file", tags=["Synthesis"])
-async def synthesize_file(
-    text: str = Query(..., min_length=1, max_length=10000, description="Text to synthesize"),
-    voice: str = Query(default="M1", description="Voice key"),
-    language: str = Query(default="en", description="Language code"),
-    speed: float = Query(default=1.0, ge=0.5, le=2.0),
-    quality: str = Query(default="balanced"),
-):
+@app.post("/synthesize/bytes", tags=["Synthesis"])
+async def synthesize_bytes(request: SynthesizeRequest):
     """
-    Synthesize text to speech and return audio file directly.
+    Synthesize text and return audio as base64-encoded data.
     
-    Returns: audio/wav file
+    Returns JSON with base64-encoded audio for direct use in applications.
     """
     try:
         # Validate inputs
-        validate_voice(voice)
-        validate_language(language)
+        validate_voice(request.voice)
+        validate_language(request.language)
         
         # Prepare text
-        tagged_text, lang_value = validate_and_prepare_text(text, language)
+        tagged_text, lang_value = validate_and_prepare_text(request.text, request.language)
         
         # Get TTS instance
         tts = get_tts()
-        style = tts.get_voice_style(voice.upper())
+        style = tts.get_voice_style(request.voice.upper())
         
         # Determine quality steps
-        quality_steps = {"fast": 3, "balanced": 5, "high": 10, "ultra": 15}
-        steps = quality_steps.get(quality, 5)
+        quality_steps = {
+            "fast": 3,
+            "balanced": 5,
+            "high": 10,
+            "ultra": 15
+        }
+        steps = request.total_steps or quality_steps.get(request.quality, 5)
         
         # Synthesize
         wav, duration = tts.synthesize(
             tagged_text,
             voice_style=style,
             lang=lang_value,
-            speed=speed,
+            speed=request.speed,
             total_steps=steps,
+            max_chunk_length=request.max_chunk_length,
+            silence_duration=request.silence_duration,
         )
         
-        # Save to temp file
+        # Convert to base64 (save to temp file first for proper WAV format)
         import tempfile
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            tts.save_audio(wav, tmp.name)
-            
-            return FileResponse(
-                tmp.name,
-                media_type="audio/wav",
-                filename=f"supertonic_{lang_value}_{voice}.wav"
-            )
-            
+            tmp_path = tmp.name
+        
+        tts.save_audio(wav, tmp_path)
+        
+        with open(tmp_path, 'rb') as f:
+            audio_bytes = f.read()
+        
+        import os
+        os.unlink(tmp_path)
+        
+        audio_data = base64.b64encode(audio_bytes).decode('utf-8')
+        
+        return AudioDataResponse(
+            success=True,
+            message="Audio synthesized successfully",
+            duration=duration[0],
+            language=lang_value,
+            voice=request.voice.upper(),
+            text_length=len(request.text),
+            audio_format="wav",
+            sample_rate=44100,
+            audio_data=audio_data
+        )
+        
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Synthesis failed: {str(e)}")
+
+
+@app.get("/synthesize/file/{filename}", tags=["Synthesis"])
+async def get_audio_file(filename: str):
+    """Get a previously generated audio file."""
+    file_path = CACHE_DIR / filename
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    if not str(file_path).endswith('.wav'):
+        raise HTTPException(status_code=400, detail="Only WAV files are supported")
+    
+    return FileResponse(
+        file_path,
+        media_type="audio/wav",
+        filename=filename
+    )
+
+
+@app.get("/cache", response_model=CacheInfoResponse, tags=["Cache"])
+async def get_cache_info_endpoint():
+    """Get cache directory information."""
+    return CacheInfoResponse(**get_cache_info())
+
+
+@app.post("/cache/cleanup", tags=["Cache"])
+async def cleanup_cache_endpoint(background_tasks: BackgroundTasks):
+    """Manually trigger cache cleanup."""
+    cleanup_cache()
+    return {"message": "Cache cleanup completed", **get_cache_info()}
 
 
 @app.get("/examples/texts", tags=["Examples"])
@@ -387,7 +570,7 @@ if __name__ == "__main__":
     import uvicorn
     
     # Ensure outputs directory exists
-    Path("outputs").mkdir(exist_ok=True)
+    CACHE_DIR.mkdir(exist_ok=True)
     
     uvicorn.run(
         "src.server:app",

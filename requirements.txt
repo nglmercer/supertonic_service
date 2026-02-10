@@ -1,5 +1,18 @@
-onnxruntime==1.23.1
-numpy>=1.26.0
-soundfile>=0.12.1
-librosa>=0.10.0
-PyYAML>=6.0
+# Supertonic TTS API Dependencies
+
+# TTS - supertonic bundles onnxruntime internally
+supertonic>=1.1.0
+
+# Web Framework
+fastapi>=0.100.0
+uvicorn>=0.22.0
+
+# HTTP Client
+requests>=2.31.0
+
+# Data Validation (included with fastapi, but explicit for clarity)
+pydantic>=2.0.0
+
+# Optional: Audio processing (if needed for advanced audio manipulation)
+# soundfile>=0.12.1
+# librosa>=0.10.0
