@@ -9,14 +9,18 @@ import java.util.*;
 
 /**
  * Text-to-Speech inference class using ONNX Runtime
+ * 
+ * Uses 3 ONNX models:
+ * - text_encoder: Encodes text tokens to embeddings
+ * - latent_denoiser: Denoises latent representations (diffusion model)
+ * - voice_decoder: Decodes latent representations to audio
  */
 public class TextToSpeech implements AutoCloseable {
     private final Config config;
     private final TextProcessor textProcessor;
-    private final OrtSession dpSession;
     private final OrtSession textEncSession;
-    private final OrtSession vectorEstSession;
-    private final OrtSession vocoderSession;
+    private final OrtSession latentDenoiserSession;
+    private final OrtSession voiceDecoderSession;
     
     public final int sampleRate;
     private final int baseChunkSize;
@@ -24,14 +28,13 @@ public class TextToSpeech implements AutoCloseable {
     private final int ldim;
     
     public TextToSpeech(Config config, TextProcessor textProcessor,
-                        OrtSession dpSession, OrtSession textEncSession,
-                        OrtSession vectorEstSession, OrtSession vocoderSession) {
+                        OrtSession textEncSession, OrtSession latentDenoiserSession,
+                        OrtSession voiceDecoderSession) {
         this.config = config;
         this.textProcessor = textProcessor;
-        this.dpSession = dpSession;
         this.textEncSession = textEncSession;
-        this.vectorEstSession = vectorEstSession;
-        this.vocoderSession = vocoderSession;
+        this.latentDenoiserSession = latentDenoiserSession;
+        this.voiceDecoderSession = voiceDecoderSession;
         this.sampleRate = config.ae.sampleRate;
         this.baseChunkSize = config.ae.baseChunkSize;
         this.chunkCompress = config.ttl.chunkCompressFactor;
@@ -48,65 +51,64 @@ public class TextToSpeech implements AutoCloseable {
         // Process text
         TextProcessor.TextProcessResult textResult = textProcessor.process(textList, langList);
         long[][] textIds = textResult.textIds;
-        float[][][] textMask = textResult.textMask;
+        long[][] textMask = textResult.textMask;
         
         // Create tensors
         OnnxTensor textIdsTensor = createLongTensor(textIds, env);
-        OnnxTensor textMaskTensor = createFloatTensor(textMask, env);
-        
-        // Duration prediction
-        Map<String, OnnxTensor> dpInputs = new HashMap<>();
-        dpInputs.put("text_ids", textIdsTensor);
-        dpInputs.put("style_dp", style.dpTensor);
-        dpInputs.put("text_mask", textMaskTensor);
-        
-        OrtSession.Result dpResult = dpSession.run(dpInputs);
-        float[] duration = getFloatArray(dpResult, 0);
-        
-        // Apply speed factor
-        for (int i = 0; i < duration.length; i++) {
-            duration[i] /= speed;
-        }
+        OnnxTensor textMaskTensor = createLongTensor(textMask, env);
         
         // Text encoding
         Map<String, OnnxTensor> textEncInputs = new HashMap<>();
-        textEncInputs.put("text_ids", textIdsTensor);
-        textEncInputs.put("style_ttl", style.ttlTensor);
-        textEncInputs.put("text_mask", textMaskTensor);
+        textEncInputs.put("input_ids", textIdsTensor);
+        textEncInputs.put("attention_mask", textMaskTensor);
+        textEncInputs.put("style", style.ttlTensor);  // Add style tensor
         
         OrtSession.Result textEncResult = textEncSession.run(textEncInputs);
+        
+        // Get text embeddings from encoder
         OnnxTensor textEmbTensor = (OnnxTensor) textEncResult.get(0);
+        
+        // Estimate duration from text mask
+        float[] duration = new float[bsz];
+        for (int i = 0; i < bsz; i++) {
+            // Count non-zero mask values
+            int len = 0;
+            for (int j = 0; j < textMask[i].length; j++) {
+                if (textMask[i][j] > 0) len++;
+            }
+            duration[i] = len / speed;
+        }
         
         // Sample noisy latent
         NoisyLatentResult noisyLatentResult = sampleNoisyLatent(duration);
         float[][][] xt = noisyLatentResult.noisyLatent;
         float[][][] latentMask = noisyLatentResult.latentMask;
         
-        // Prepare constant tensors
-        float[] totalStepArray = new float[bsz];
-        Arrays.fill(totalStepArray, (float) totalStep);
+        // Prepare constant tensors for diffusion
+        long[] totalStepArray = new long[bsz];
+        Arrays.fill(totalStepArray, (long) totalStep);
         OnnxTensor totalStepTensor = OnnxTensor.createTensor(env, totalStepArray);
         
-        // Denoising loop
+        // Denoising loop (diffusion process)
         for (int step = 0; step < totalStep; step++) {
-            float[] currentStepArray = new float[bsz];
-            Arrays.fill(currentStepArray, (float) step);
+            long[] currentStepArray = new long[bsz];
+            Arrays.fill(currentStepArray, (long) step);
             OnnxTensor currentStepTensor = OnnxTensor.createTensor(env, currentStepArray);
             OnnxTensor noisyLatentTensor = createFloatTensor(xt, env);
             OnnxTensor latentMaskTensor = createFloatTensor(latentMask, env);
-            OnnxTensor textMaskTensor2 = createFloatTensor(textMask, env);
+            OnnxTensor textMaskTensor2 = createLongTensor(textMask, env);
             
-            Map<String, OnnxTensor> vectorEstInputs = new HashMap<>();
-            vectorEstInputs.put("noisy_latent", noisyLatentTensor);
-            vectorEstInputs.put("text_emb", textEmbTensor);
-            vectorEstInputs.put("style_ttl", style.ttlTensor);
-            vectorEstInputs.put("latent_mask", latentMaskTensor);
-            vectorEstInputs.put("text_mask", textMaskTensor2);
-            vectorEstInputs.put("current_step", currentStepTensor);
-            vectorEstInputs.put("total_step", totalStepTensor);
+            Map<String, OnnxTensor> denoiserInputs = new HashMap<>();
+            denoiserInputs.put("noisy_latents", noisyLatentTensor);
+            denoiserInputs.put("encoder_outputs", textEmbTensor);
+            denoiserInputs.put("latent_mask", latentMaskTensor);
+            denoiserInputs.put("attention_mask", textMaskTensor2);
+            denoiserInputs.put("timestep", currentStepTensor);
+            denoiserInputs.put("num_inference_steps", totalStepTensor);
+            denoiserInputs.put("style", style.ttlTensor);
             
-            OrtSession.Result vectorEstResult = vectorEstSession.run(vectorEstInputs);
-            float[][][] denoised = (float[][][]) vectorEstResult.get(0).getValue();
+            OrtSession.Result denoiserResult = latentDenoiserSession.run(denoiserInputs);
+            float[][][] denoised = (float[][][]) denoiserResult.get(0).getValue();
             
             xt = denoised;
             
@@ -114,16 +116,16 @@ public class TextToSpeech implements AutoCloseable {
             noisyLatentTensor.close();
             latentMaskTensor.close();
             textMaskTensor2.close();
-            vectorEstResult.close();
+            denoiserResult.close();
         }
         
-        // Vocoder
+        // Voice decoder - convert latent to audio
         OnnxTensor finalLatentTensor = createFloatTensor(xt, env);
-        Map<String, OnnxTensor> vocoderInputs = new HashMap<>();
-        vocoderInputs.put("latent", finalLatentTensor);
+        Map<String, OnnxTensor> decoderInputs = new HashMap<>();
+        decoderInputs.put("latent", finalLatentTensor);
         
-        OrtSession.Result vocoderResult = vocoderSession.run(vocoderInputs);
-        float[][] wavBatch = (float[][]) vocoderResult.get(0).getValue();
+        OrtSession.Result decoderResult = voiceDecoderSession.run(decoderInputs);
+        float[][] wavBatch = (float[][]) decoderResult.get(0).getValue();
         
         // Flatten audio
         int totalSamples = 0;
@@ -140,11 +142,10 @@ public class TextToSpeech implements AutoCloseable {
         // Cleanup
         textIdsTensor.close();
         textMaskTensor.close();
-        dpResult.close();
         textEncResult.close();
         totalStepTensor.close();
         finalLatentTensor.close();
-        vocoderResult.close();
+        decoderResult.close();
         
         return new Result(wav, duration);
     }
@@ -202,60 +203,34 @@ public class TextToSpeech implements AutoCloseable {
             maxDur = Math.max(maxDur, d);
         }
         
-        long wavLenMax = (long) (maxDur * sampleRate);
-        long[] wavLengths = new long[bsz];
-        for (int i = 0; i < bsz; i++) {
-            wavLengths[i] = (long) (duration[i] * sampleRate);
-        }
+        int latentLen = (int) (maxDur * sampleRate / chunkCompress);
+        latentLen = Math.max(latentLen, 1);
         
-        int chunkSize = baseChunkSize * chunkCompress;
-        int latentLen = (int) ((wavLenMax + chunkSize - 1) / chunkSize);
-        int latentDim = ldim * chunkCompress;
+        // The model expects latent dimension of 144 (not 24 from config)
+        int latentDim = 144;
         
-        Random rng = new Random();
+        // Initialize with random noise
+        Random rand = new Random();
         float[][][] noisyLatent = new float[bsz][latentDim][latentLen];
-        for (int b = 0; b < bsz; b++) {
-            for (int d = 0; d < latentDim; d++) {
-                for (int t = 0; t < latentLen; t++) {
-                    double u1 = Math.max(1e-10, rng.nextDouble());
-                    double u2 = rng.nextDouble();
-                    noisyLatent[b][d][t] = (float) (Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2));
+        for (int i = 0; i < bsz; i++) {
+            for (int j = 0; j < latentDim; j++) {
+                for (int k = 0; k < latentLen; k++) {
+                    noisyLatent[i][j][k] = (float) (rand.nextGaussian() * 0.5);
                 }
             }
         }
         
-        float[][][] latentMask = getLatentMask(wavLengths);
-        
-        for (int b = 0; b < bsz; b++) {
-            for (int d = 0; d < latentDim; d++) {
-                for (int t = 0; t < latentLen; t++) {
-                    noisyLatent[b][d][t] *= latentMask[b][0][t];
-                }
+        // Create latent mask
+        float[][][] latentMask = new float[bsz][1][latentLen];
+        for (int i = 0; i < bsz; i++) {
+            int len = (int) (duration[i] * sampleRate / chunkCompress);
+            len = Math.min(len, latentLen);
+            for (int j = 0; j < latentLen; j++) {
+                latentMask[i][0][j] = j < len ? 1.0f : 0.0f;
             }
         }
         
         return new NoisyLatentResult(noisyLatent, latentMask);
-    }
-    
-    private float[][][] getLatentMask(long[] wavLengths) {
-        long baseChunkSizeVal = baseChunkSize;
-        long chunkCompressFactor = chunkCompress;
-        long latentSize = baseChunkSizeVal * chunkCompressFactor;
-        
-        long[] latentLengths = new long[wavLengths.length];
-        long maxLen = 0;
-        for (int i = 0; i < wavLengths.length; i++) {
-            latentLengths[i] = (wavLengths[i] + latentSize - 1) / latentSize;
-            maxLen = Math.max(maxLen, latentLengths[i]);
-        }
-        
-        float[][][] mask = new float[wavLengths.length][1][(int) maxLen];
-        for (int i = 0; i < wavLengths.length; i++) {
-            for (int j = 0; j < maxLen; j++) {
-                mask[i][0][j] = j < latentLengths[i] ? 1.0f : 0.0f;
-            }
-        }
-        return mask;
     }
     
     private OnnxTensor createFloatTensor(float[][][] array, OrtEnvironment env) throws OrtException {
@@ -293,6 +268,41 @@ public class TextToSpeech implements AutoCloseable {
         return OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(flat), shape);
     }
     
+    private OnnxTensor createFloatTensorFromLong(long[][] array, OrtEnvironment env) throws OrtException {
+        int dim0 = array.length;
+        int dim1 = array[0].length;
+        
+        float[] flat = new float[dim0 * dim1];
+        int idx = 0;
+        for (int i = 0; i < dim0; i++) {
+            for (int j = 0; j < dim1; j++) {
+                flat[idx++] = (float) array[i][j];
+            }
+        }
+        
+        long[] shape = {dim0, dim1};
+        return OnnxTensor.createTensor(env, java.nio.FloatBuffer.wrap(flat), shape);
+    }
+    
+    private OnnxTensor createLongTensorFromFloat(float[][][] array, OrtEnvironment env) throws OrtException {
+        int dim0 = array.length;
+        int dim1 = array[0].length;
+        int dim2 = array[0][0].length;
+        
+        long[] flat = new long[dim0 * dim1 * dim2];
+        int idx = 0;
+        for (int i = 0; i < dim0; i++) {
+            for (int j = 0; j < dim1; j++) {
+                for (int k = 0; k < dim2; k++) {
+                    flat[idx++] = (long) array[i][j][k];
+                }
+            }
+        }
+        
+        long[] shape = {dim0, dim1, dim2};
+        return OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(flat), shape);
+    }
+    
     private float[] getFloatArray(OrtSession.Result result, int index) throws OrtException {
         Object value = result.get(index).getValue();
         if (value instanceof float[][]) {
@@ -303,10 +313,9 @@ public class TextToSpeech implements AutoCloseable {
     
     @Override
     public void close() throws Exception {
-        if (dpSession != null) dpSession.close();
         if (textEncSession != null) textEncSession.close();
-        if (vectorEstSession != null) vectorEstSession.close();
-        if (vocoderSession != null) vocoderSession.close();
+        if (latentDenoiserSession != null) latentDenoiserSession.close();
+        if (voiceDecoderSession != null) voiceDecoderSession.close();
     }
     
     private static class NoisyLatentResult {

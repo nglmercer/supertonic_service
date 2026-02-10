@@ -8,6 +8,7 @@ import ai.onnxruntime.*;
 import java.io.File;
 import java.io.IOException;
 import java.nio.FloatBuffer;
+import java.util.List;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -16,10 +17,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  */
 public final class ModelLoader {
     
+    private static final int DEFAULT_STYLE_DIM = 128;
+    
     private ModelLoader() {} // Prevent instantiation
     
     /**
-     * Load TTS components from ONNX directory
+     * Load TTS components, auto-downloading models if necessary
      */
     public static TextToSpeech loadTextToSpeech(String onnxDir, boolean useGpu, OrtEnvironment env) 
             throws IOException, OrtException {
@@ -28,35 +31,57 @@ public final class ModelLoader {
         }
         System.out.println("Using CPU for inference\n");
         
+        // Auto-download models if needed
+        String cacheDir = ModelDownloader.ensureModelsExist(null);
+        String modelDir = ModelDownloader.getOnnxDir(cacheDir);
+        
         // Load config
-        Config config = loadConfig(onnxDir);
+        Config config = loadConfig(cacheDir);
         
         // Create session options
         OrtSession.SessionOptions opts = new OrtSession.SessionOptions();
         
-        // Load models
-        OrtSession dpSession = env.createSession(onnxDir + "/duration_predictor.onnx", opts);
-        OrtSession textEncSession = env.createSession(onnxDir + "/text_encoder.onnx", opts);
-        OrtSession vectorEstSession = env.createSession(onnxDir + "/vector_estimator.onnx", opts);
-        OrtSession vocoderSession = env.createSession(onnxDir + "/vocoder.onnx", opts);
+        // Load models - using the new model names from cache
+        OrtSession textEncSession = env.createSession(modelDir + "/text_encoder.onnx", opts);
+        OrtSession latentDenoiserSession = env.createSession(modelDir + "/latent_denoiser.onnx", opts);
+        OrtSession voiceDecoderSession = env.createSession(modelDir + "/voice_decoder.onnx", opts);
         
-        // Load text processor
+        // Load text processor with tokenizer
         TextProcessor textProcessor;
         try {
-            textProcessor = new TextProcessor(onnxDir + "/unicode_indexer.json");
+            String tokenizerPath = ModelDownloader.getTokenizerPath(cacheDir);
+            textProcessor = new TextProcessor(tokenizerPath);
         } catch (Exception e) {
             throw new IOException("Failed to create TextProcessor", e);
         }
         
-        return new TextToSpeech(config, textProcessor, dpSession, textEncSession, 
-                               vectorEstSession, vocoderSession);
+        return new TextToSpeech(config, textProcessor, textEncSession, latentDenoiserSession, 
+                               voiceDecoderSession);
     }
     
     /**
-     * Load voice style from JSON files
+     * Load voice style from JSON files, or create default style if files don't exist
      */
-    public static Style loadVoiceStyle(java.util.List<String> voiceStylePaths, boolean verbose, OrtEnvironment env) 
+    public static Style loadVoiceStyle(List<String> voiceStylePaths, boolean verbose, OrtEnvironment env) 
             throws IOException, OrtException {
+        // Check if any voice style files exist
+        boolean hasStyleFiles = true;
+        for (String path : voiceStylePaths) {
+            if (!new File(path).exists()) {
+                hasStyleFiles = false;
+                break;
+            }
+        }
+        
+        if (!hasStyleFiles) {
+            // Create default neutral style
+            if (verbose) {
+                System.out.println("Voice style files not found, using default neutral style\n");
+            }
+            return Style.createDefault(env, voiceStylePaths.size(), DEFAULT_STYLE_DIM);
+        }
+        
+        // Load from files
         int bsz = voiceStylePaths.size();
         
         // Read first file to get dimensions
@@ -123,18 +148,19 @@ public final class ModelLoader {
         return new Style(ttlTensor, dpTensor);
     }
     
-    private static Config loadConfig(String onnxDir) throws IOException {
+    private static Config loadConfig(String cacheDir) throws IOException {
         ObjectMapper mapper = new ObjectMapper();
-        JsonNode root = mapper.readTree(new File(onnxDir + "/tts.json"));
+        String configPath = ModelDownloader.getConfigPath(cacheDir);
+        JsonNode root = mapper.readTree(new File(configPath));
         
         Config config = new Config();
         config.ae = new Config.AEConfig();
-        config.ae.sampleRate = root.get("ae").get("sample_rate").asInt();
-        config.ae.baseChunkSize = root.get("ae").get("base_chunk_size").asInt();
+        config.ae.sampleRate = root.get("sampling_rate").asInt();
+        config.ae.baseChunkSize = root.get("base_chunk_size").asInt();
         
         config.ttl = new Config.TTLConfig();
-        config.ttl.chunkCompressFactor = root.get("ttl").get("chunk_compress_factor").asInt();
-        config.ttl.latentDim = root.get("ttl").get("latent_dim").asInt();
+        config.ttl.chunkCompressFactor = root.get("chunk_compress_factor").asInt();
+        config.ttl.latentDim = root.get("latent_dim").asInt();
         
         return config;
     }

@@ -4,17 +4,48 @@ import supertonic.model.Languages;
 
 import java.text.Normalizer;
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * Unicode text processor for TTS preprocessing
  */
 public class TextProcessor {
-    private final long[] indexer;
+    private final Map<Integer, Long> vocabMap; // unicode codepoint -> token id
+    private final long unkToken;
     
-    public TextProcessor(String unicodeIndexerJsonPath) throws Exception {
-        this.indexer = loadJsonLongArray(unicodeIndexerJsonPath);
+    public TextProcessor(String tokenizerJsonPath) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode root = mapper.readTree(Files.readAllBytes(Paths.get(tokenizerJsonPath)));
+        
+        // Parse vocab from HuggingFace tokenizer format
+        this.vocabMap = new HashMap<>();
+        JsonNode vocabNode = root.get("model").get("vocab");
+        
+        Iterator<Map.Entry<String, JsonNode>> fields = vocabNode.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            String token = entry.getKey();
+            long tokenId = entry.getValue().asLong();
+            
+            // Map each character in the token to its ID
+            // For single-character tokens (which is typical for character-level tokenizers)
+            if (token.length() == 1) {
+                vocabMap.put((int) token.charAt(0), tokenId);
+            } else {
+                // For multi-character tokens, map the first codepoint
+                int codePoint = token.codePointAt(0);
+                vocabMap.put(codePoint, tokenId);
+            }
+        }
+        
+        // UNK token is typically the vocab size or a specific token
+        this.unkToken = vocabMap.size();
+        
+        System.out.println("Loaded tokenizer with " + vocabMap.size() + " tokens");
     }
     
     /**
@@ -26,28 +57,32 @@ public class TextProcessor {
             processedTexts.add(preprocessText(textList.get(i), langList.get(i)));
         }
         
-        // Convert texts to unicode values first
-        List<int[]> allUnicodeVals = new ArrayList<>();
-        for (String text : processedTexts) {
-            allUnicodeVals.add(textToUnicodeValues(text));
-        }
-        
+        // Convert texts to token IDs
+        List<long[]> allTokenIds = new ArrayList<>();
         int[] textIdsLengths = new int[processedTexts.size()];
         int maxLen = 0;
-        for (int i = 0; i < allUnicodeVals.size(); i++) {
-            textIdsLengths[i] = allUnicodeVals.get(i).length;
-            maxLen = Math.max(maxLen, textIdsLengths[i]);
+        
+        for (int i = 0; i < processedTexts.size(); i++) {
+            long[] tokenIds = textToTokenIds(processedTexts.get(i));
+            allTokenIds.add(tokenIds);
+            textIdsLengths[i] = tokenIds.length;
+            maxLen = Math.max(maxLen, tokenIds.length);
         }
         
+        // Pad to max length
         long[][] textIds = new long[processedTexts.size()][maxLen];
-        for (int i = 0; i < allUnicodeVals.size(); i++) {
-            int[] unicodeVals = allUnicodeVals.get(i);
-            for (int j = 0; j < unicodeVals.length; j++) {
-                textIds[i][j] = indexer[unicodeVals[j]];
+        for (int i = 0; i < allTokenIds.size(); i++) {
+            long[] tokenIds = allTokenIds.get(i);
+            for (int j = 0; j < tokenIds.length; j++) {
+                textIds[i][j] = tokenIds[j];
+            }
+            // Pad with 0s (or could use unkToken)
+            for (int j = tokenIds.length; j < maxLen; j++) {
+                textIds[i][j] = 0;
             }
         }
         
-        float[][][] textMask = getTextMask(textIdsLengths);
+        long[][] textMask = getTextMask(textIdsLengths);
         return new TextProcessResult(textIds, textMask);
     }
     
@@ -158,43 +193,45 @@ public class TextProcessor {
         return text;
     }
     
-    private int[] textToUnicodeValues(String text) {
-        return text.codePoints().toArray();
+    private long[] textToTokenIds(String text) {
+        // Convert text to token IDs using the vocabulary
+        int[] codePoints = text.codePoints().toArray();
+        long[] tokenIds = new long[codePoints.length];
+        
+        for (int i = 0; i < codePoints.length; i++) {
+            Long tokenId = vocabMap.get(codePoints[i]);
+            if (tokenId != null) {
+                tokenIds[i] = tokenId;
+            } else {
+                // Use UNK token for unknown characters
+                tokenIds[i] = unkToken;
+            }
+        }
+        
+        return tokenIds;
     }
     
-    private float[][][] getTextMask(int[] lengths) {
+    private long[][] getTextMask(int[] lengths) {
         int bsz = lengths.length;
         int maxLen = 0;
         for (int len : lengths) {
             maxLen = Math.max(maxLen, len);
         }
         
-        float[][][] mask = new float[bsz][1][maxLen];
+        long[][] mask = new long[bsz][maxLen];
         for (int i = 0; i < bsz; i++) {
             for (int j = 0; j < maxLen; j++) {
-                mask[i][0][j] = j < lengths[i] ? 1.0f : 0.0f;
+                mask[i][j] = j < lengths[i] ? 1L : 0L;
             }
         }
         return mask;
     }
     
-    private long[] loadJsonLongArray(String filePath) throws Exception {
-        // Simplified JSON parsing - in production use Jackson
-        String content = new String(java.nio.file.Files.readAllBytes(
-            java.nio.file.Paths.get(filePath)));
-        String[] parts = content.replaceAll("[\\[\\]]", "").split(",");
-        long[] result = new long[parts.length];
-        for (int i = 0; i < parts.length; i++) {
-            result[i] = Long.parseLong(parts[i].trim());
-        }
-        return result;
-    }
-    
     public static class TextProcessResult {
         public final long[][] textIds;
-        public final float[][][] textMask;
+        public final long[][] textMask;
         
-        public TextProcessResult(long[][] textIds, float[][][] textMask) {
+        public TextProcessResult(long[][] textIds, long[][] textMask) {
             this.textIds = textIds;
             this.textMask = textMask;
         }
