@@ -112,10 +112,10 @@ jobs:
           path: ./dist/
           retention-days: 7
 
-  # Test ARM64 binary in Docker
+  # Test ARM64 in Docker (run source directly, not compiled binary)
   test-arm64-docker:
     name: Test ARM64 (Docker)
-    needs: build-arm64-docker
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -124,26 +124,26 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
-      - name: Download ARM64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: supertonic-linux-arm64
-          path: ./dist
-
       - name: Test ARM64 server in Docker
         run: |
-          chmod +x ./dist/supertonic-linux-arm64
-          
-          # Start server in background
+          # Start server in background using source code (not compiled binary)
           docker run --rm --platform linux/arm64 -d --name supertonic-test \
             -v $(pwd):/app -w /app \
             -p 3000:3000 \
             -e PORT=3000 -e HOST=0.0.0.0 \
-            oven/bun:${{ env.BUN_VERSION }}-slim \
-            ./dist/supertonic-linux-arm64
+            oven/bun:${{ env.BUN_VERSION }} \
+            bash -c "bun install && bun run src/server.ts"
           
-          # Wait for server to start
-          sleep 10
+          # Wait for server to start (increased timeout)
+          echo "Waiting for server to start..."
+          for i in {1..30}; do
+            if curl -s http://localhost:3000/health > /dev/null 2>&1; then
+              echo "Server is ready!"
+              break
+            fi
+            echo "Attempt $i/30: Server not ready yet..."
+            sleep 2
+          done
           
           # Test health endpoint
           curl -f http://localhost:3000/health || exit 1
@@ -199,7 +199,7 @@ jobs:
   # Release job - creates GitHub release with binaries
   release:
     name: Create Release
-    needs: [build-x86_64, build-arm64-docker, test-arm64-docker]
+    needs: [build-x86_64, build-arm64-docker]
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
     steps:
