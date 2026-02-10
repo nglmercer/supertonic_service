@@ -1,64 +1,56 @@
-# Supertonic TTS API
+# Supertonic TTS Service
 
-Text-to-Speech microservice using Supertonic ONNX models.
+Text-to-Speech microservice with HTTP API and optional libp2p P2P networking.
 
 ## Quick Start
 
 ```bash
 bun install
-bun run start
+bun start
 ```
 
-Server runs on `http://localhost:3000`
+Server runs at `http://localhost:3000`
 
-## Endpoints
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/tts/synthesize` | Synthesize text to speech |
+| POST | `/api/tts/synthesize-mixed` | Synthesize mixed-language text |
+| GET | `/api/tts/voices` | List available voices |
+| GET | `/api/tts/health` | Health check |
 
 ### POST `/api/tts/synthesize`
 
-Synthesize text to speech.
-
-**Request:**
 ```json
 {
   "text": "Hello world",
   "voice": "F1",
-  "filename": "output",
-  "language": "en",
-  "writeToFile": false
+  "options": { "rate": "0%" }
 }
 ```
 
-**Response:**
+Response:
 ```json
 {
   "success": true,
   "audioBase64": "...",
-  "detectedLanguage": "en"
+  "detectedLanguage": "en",
+  "savedPath": null
 }
 ```
 
 ### POST `/api/tts/synthesize-mixed`
 
-Synthesize mixed-language text with language tags.
-
-**Request:**
 ```json
 {
-  "taggedText": "<en>Hello</en> <es>Hola</es>",
+  "taggedText": "<en>Hello</en><es>Hola</es>",
   "voice": "F1",
   "silenceDuration": 0.3
 }
 ```
 
-### GET `/api/tts/voices`
-
-List available voices.
-
-### GET `/api/health`
-
-Health check.
-
-## Options
+## Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -66,12 +58,46 @@ Health check.
 | `voice` | string | `F1` | Voice: `F1-F5`, `M1-M5` |
 | `language` | string | auto | `en`, `ko`, `es`, `pt`, `fr` |
 | `options.rate` | string | `0%` | Speed: `-50%` to `100%` |
-| `writeToFile` | boolean | `false` | Save to output directory |
+| `writeToFile` | boolean | `false` | Save to server output dir |
 
-## Environment
+## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3000` | Server port |
 | `HOST` | `0.0.0.0` | Server host |
 | `TTS_OUTPUT_DIR` | `./output` | Audio output directory |
+| `LIBP2P_ENABLED` | `false` | Enable P2P networking |
+
+## Client Usage
+
+```bash
+# Run the example client
+bun run client
+
+# Custom server URL
+SERVER_URL=http://localhost:3000 bun run client
+```
+
+The client saves audio files locally from the base64 response.
+
+## Docker
+
+```bash
+docker build -t supertonic .
+docker run -p 3000:3000 supertonic
+```
+
+Multi-platform (x86_64 and ARM64) supported.
+
+## Build Standalone Binaries
+
+```bash
+bun run build          # Current architecture
+bun run build:all      # All architectures
+bun run build:docker   # Docker image
+```
+
+## License
+
+MIT

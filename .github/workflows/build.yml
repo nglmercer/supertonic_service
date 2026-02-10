@@ -8,6 +8,10 @@ on:
   release:
     types: [created]
 
+permissions:
+  contents: write
+  packages: write
+
 env:
   BUN_VERSION: "1.1.38"
 
