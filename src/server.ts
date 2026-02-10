@@ -88,7 +88,7 @@ function initTTSService() {
 }
 
 // HTTP request handler
-async function handleRequest(req: Request): Promise<Response> {
+export async function handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url, `http://${req.headers.get('host')}`);
     const method = req.method;
     let body: any = null;
@@ -185,6 +185,11 @@ async function handleRequest(req: Request): Promise<Response> {
 }
 
 async function main() {
+    // Skip main execution when running tests
+    if (process.env.NODE_ENV === 'test' || process.env.BUN_ENV === 'test') {
+        return;
+    }
+    
     console.log('='.repeat(60));
     console.log('Supertonic TTS Service Starting...');
     console.log('='.repeat(60));

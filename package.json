@@ -7,7 +7,9 @@
     "start": "bun run src/server.ts",
     "dev": "NODE_ENV=development bun run src/server.ts",
     "demo": "bun run demo.ts",
-    "client": "bun run examples/client.ts"
+    "client": "bun run examples/client.ts",
+    "test": "bun test",
+    "test:server": "bun test src/server.test.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
