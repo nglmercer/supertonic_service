@@ -1,0 +1,222 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  release:
+    types: [created]
+
+env:
+  BUN_VERSION: "1.1.38"
+
+jobs:
+  # Test job - runs on every push and PR
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run tests
+        run: bun test
+
+  # Build job - creates binaries for multiple platforms
+  build:
+    name: Build ${{ matrix.target }}
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: bun-linux-x64
+            arch: linux-x86_64
+            artifact_name: supertonic-linux-x86_64
+          - target: bun-linux-arm64
+            arch: linux-arm64
+            artifact_name: supertonic-linux-arm64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build server binary
+        run: |
+          bun build ./src/server.ts \
+            --compile \
+            --target=${{ matrix.target }} \
+            --outfile=./dist/${{ matrix.artifact_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ./dist/${{ matrix.artifact_name }}
+          retention-days: 7
+
+  # Build client binaries
+  build-client:
+    name: Build Client ${{ matrix.target }}
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: bun-linux-x64
+            arch: linux-x86_64
+            artifact_name: supertonic-client-linux-x86_64
+          - target: bun-linux-arm64
+            arch: linux-arm64
+            artifact_name: supertonic-client-linux-arm64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build client binary
+        run: |
+          bun build ./examples/client.ts \
+            --compile \
+            --target=${{ matrix.target }} \
+            --outfile=./dist/${{ matrix.artifact_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ./dist/${{ matrix.artifact_name }}
+          retention-days: 7
+
+  # Release job - creates GitHub release with binaries
+  release:
+    name: Create Release
+    needs: [build, build-client]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./dist
+
+      - name: Create startup script
+        run: |
+          cat > ./dist/start.sh << 'EOF'
+          #!/bin/bash
+          # Supertonic TTS Service Startup Script
+          
+          export PORT=${PORT:-3000}
+          export HOST=${HOST:-0.0.0.0}
+          export TTS_OUTPUT_DIR=${TTS_OUTPUT_DIR:-./output}
+          export TTS_DEFAULT_VOICE=${TTS_DEFAULT_VOICE:-F1}
+          
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          
+          ARCH=$(uname -m)
+          case $ARCH in
+              x86_64|amd64)
+                  BINARY="${SCRIPT_DIR}/supertonic-linux-x86_64"
+                  ;;
+              aarch64|arm64)
+                  BINARY="${SCRIPT_DIR}/supertonic-linux-arm64"
+                  ;;
+              *)
+                  echo "Unsupported architecture: $ARCH"
+                  exit 1
+                  ;;
+          esac
+          
+          if [ ! -f "$BINARY" ]; then
+              echo "Binary not found: $BINARY"
+              exit 1
+          fi
+          
+          mkdir -p $TTS_OUTPUT_DIR
+          exec "$BINARY"
+          EOF
+          chmod +x ./dist/start.sh
+
+      - name: Create release archive
+        run: |
+          cd dist
+          tar -czvf supertonic-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz \
+            supertonic-linux-x86_64 supertonic-client-linux-x86_64 start.sh
+          tar -czvf supertonic-${{ github.event.release.tag_name }}-linux-arm64.tar.gz \
+            supertonic-linux-arm64 supertonic-client-linux-arm64 start.sh
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ./dist/supertonic-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz
+            ./dist/supertonic-${{ github.event.release.tag_name }}-linux-arm64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Optional: Docker build job
+  docker:
+    name: Build Docker Image
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' || github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: github.event_name == 'release'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: ${{ github.event_name == 'release' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64

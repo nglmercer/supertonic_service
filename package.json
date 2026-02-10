@@ -1,5 +1,6 @@
 {
   "name": "supertonic",
+  "version": "1.0.0",
   "module": "src/index.ts",
   "type": "module",
   "private": true,
@@ -9,7 +10,11 @@
     "demo": "bun run demo.ts",
     "client": "bun run examples/client.ts",
     "test": "bun test",
-    "test:server": "bun test src/server.test.ts"
+    "test:server": "bun test src/server.test.ts",
+    "build": "bash scripts/build.sh current",
+    "build:all": "bash scripts/build.sh all",
+    "build:x86_64": "bash scripts/build.sh x86_64",
+    "build:arm64": "bash scripts/build.sh arm64"
   },
   "devDependencies": {
     "@types/bun": "latest",
