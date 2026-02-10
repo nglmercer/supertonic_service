@@ -87,6 +87,9 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
+      - name: Create dist directory
+        run: mkdir -p ./dist/lib/arm64
+
       - name: Build ARM64 binary in Docker
         run: |
           docker run --rm --platform linux/arm64 \
@@ -96,9 +99,11 @@ jobs:
 
       - name: Copy ARM64 native libraries
         run: |
-          mkdir -p ./dist/lib/arm64
           cp node_modules/onnxruntime-node/bin/napi-v3/linux/arm64/*.so* ./dist/lib/arm64/ 2>/dev/null || true
           cp node_modules/onnxruntime-node/bin/napi-v3/linux/arm64/*.node ./dist/lib/arm64/ 2>/dev/null || true
+
+      - name: Fix permissions
+        run: sudo chown -R $(whoami):$(id -gn) ./dist
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
