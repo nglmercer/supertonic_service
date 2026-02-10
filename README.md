@@ -90,13 +90,17 @@ docker run -p 3000:3000 supertonic
 
 Multi-platform (x86_64 and ARM64) supported.
 
-## Build Standalone Binaries
+## Build
 
 ```bash
-bun run build          # Current architecture
-bun run build:all      # All architectures
-bun run build:docker   # Docker image
+# Standalone binary (x86_64 only)
+bun run build
+
+# Docker (recommended for ARM64)
+bun run build:docker
 ```
+
+> **Note**: ARM64 standalone binaries have native module compatibility issues. Use Docker for ARM64 deployment.
 
 ## License
 
