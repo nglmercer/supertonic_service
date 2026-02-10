@@ -10,35 +10,38 @@ FastAPI-based REST API for Supertonic Text-to-Speech synthesis with multilingual
 - ⚡ **High Performance** - Fast synthesis with quality options
 - 💾 **Cache Management** - Auto-cleanup of old audio files
 - 🔄 **Flexible Output** - Save to file or get base64-encoded audio
-
-## Requirements
-
-- Python 3.8+
-- supertonic (installed automatically)
-- fastapi
-- uvicorn
-
-## Installation
-
-```bash
-pip install supertonic fastapi uvicorn requests
-```
+- 🐳 **Docker Ready** - Deploy anywhere with Docker
 
 ## Quick Start
 
-### 1. Start the Server
+### Option 1: Docker (Recommended)
 
 ```bash
+# Pull and run
+docker run -p 8000:8000 ghcr.io/yourusername/supertonic-tts-api:latest
+
+# Or build locally
+docker build -t supertonic-api .
+docker run -p 8000:8000 supertonic-api
+```
+
+### Option 2: Python
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Start server
 python -m uvicorn src.server:app --host 0.0.0.0 --port 8000
 ```
 
-Or use the run script:
+### Option 3: Run Tests
 
 ```bash
 python test_api.py
 ```
 
-### 2. Use the API
+## Usage Examples
 
 **Health Check:**
 ```bash
@@ -55,7 +58,7 @@ curl http://localhost:8000/voices
 curl -X POST http://localhost:8000/synthesize \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "Hello world! This is Supertonic TTS.",
+    "text": "Hello world!",
     "voice": "M1",
     "language": "en",
     "save_to_file": true
@@ -67,7 +70,7 @@ curl -X POST http://localhost:8000/synthesize \
 curl -X POST http://localhost:8000/synthesize/bytes \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "Hola mundo! Esta es Supertonic TTS.",
+    "text": "Hola mundo!",
     "voice": "F1",
     "language": "es"
   }'
@@ -84,73 +87,10 @@ curl -X POST http://localhost:8000/synthesize/bytes \
 | POST | `/validate` | Validate text before synthesis |
 | POST | `/synthesize` | Synthesize audio (file mode) |
 | POST | `/synthesize/bytes` | Synthesize audio (base64 mode) |
-| GET | `/synthesize/file/{filename}` | Get saved audio file |
 | GET | `/cache` | Get cache information |
 | POST | `/cache/cleanup` | Trigger cache cleanup |
-| GET | `/voices/{key}/info` | Get voice information |
-| GET | `/examples/texts` | Get example texts |
 
-## Request/Response Examples
-
-### Synthesis Request (File Mode)
-
-```json
-POST /synthesize
-{
-  "text": "Hello world!",
-  "voice": "M1",
-  "language": "en",
-  "speed": 1.0,
-  "quality": "balanced",
-  "save_to_file": true,
-  "output_path": null
-}
-```
-
-### Synthesis Response (File Mode)
-
-```json
-{
-  "success": true,
-  "message": "Audio synthesized successfully",
-  "audio_path": "outputs/synthesize/tts_en_M1_abc123.wav",
-  "duration": 4.12,
-  "language": "en",
-  "voice": "M1",
-  "text_length": 12
-}
-```
-
-### Synthesis Request (Bytes Mode)
-
-```json
-POST /synthesize/bytes
-{
-  "text": "Hello world!",
-  "voice": "M1",
-  "language": "en",
-  "speed": 1.0,
-  "quality": "balanced"
-}
-```
-
-### Synthesis Response (Bytes Mode)
-
-```json
-{
-  "success": true,
-  "message": "Audio synthesized successfully",
-  "duration": 4.12,
-  "language": "en",
-  "voice": "M1",
-  "text_length": 12,
-  "audio_format": "wav",
-  "sample_rate": 44100,
-  "audio_data": "UklGRi... (base64 encoded audio)"
-}
-```
-
-## Python Client Example
+## Python Client
 
 ```python
 import requests
@@ -183,62 +123,63 @@ def synthesize_bytes(text, voice="M1", language="en"):
         f.write(audio_bytes)
     
     return data
-
-# Usage
-result = synthesize("Hello world!", voice="M1", language="en")
-print(f"Audio saved to: {result['audio_path']}")
-
-synthesize_bytes("Hola mundo!", voice="F1", language="es")
 ```
 
 ## Configuration
 
-### Cache Settings
-
-Edit `src/server.py` to configure cache:
+### Cache Settings (src/server.py)
 
 ```python
 CACHE_DIR = Path("outputs/synthesize")
 CACHE_MAX_SIZE_MB = 100  # Max cache size in MB
-CACHE_MAX_FILES = 50  # Max number of files
-CACHE_MAX_AGE_HOURS = 24  # Max age in hours
+CACHE_MAX_FILES = 50     # Max number of files
+CACHE_MAX_AGE_HOURS = 24 # Max age in hours
 ```
 
-### Default Synthesis Options
+## Docker Configuration
 
-```python
-class SynthesizeRequest:
-    text: str = Field(..., min_length=1, max_length=10000)
-    voice: str = "M1"  # M1-M5, F1-F5
-    language: str = "en"  # en, ko, es, pt, fr
-    speed: float = Field(1.0, ge=0.5, le=2.0)
-    quality: str = "balanced"  # fast, balanced, high, ultra
-    total_steps: int = None  # Auto-set by quality
-    max_chunk_length: int = 300
-    silence_duration: float = Field(0.3, ge=0.1, le=2.0)
-    save_to_file: bool = True
-    output_path: str = None
-```
-
-## Running Tests
-
+### Build Image
 ```bash
-# Run the test script (starts server, runs tests, stops server)
-python test_api.py
+docker build -t supertonic-api .
 ```
+
+### Run Container
+```bash
+docker run -p 8000:8000 \
+  -v $(pwd)/outputs:/app/outputs \
+  supertonic-api
+```
+
+### Environment Variables
+| Variable | Description | Default |
+|----------|-------------|---------|
+| PORT | Server port | 8000 |
+
+## CI/CD
+
+GitHub Actions workflow automatically:
+1. Builds and tests on every push/PR
+2. Pushes to GitHub Container Registry on tags
+3. Creates releases on version tags
+
+**Image Tags:**
+- `latest` - Latest stable version
+- `v1.1.0`, `v1.1` - Specific version tags
+- `sha-abc123` - Commit-based tags
 
 ## Project Structure
 
 ```
 supertonic/
 ├── src/
-│   ├── server.py       # FastAPI server with REST endpoints
-│   └── core/           # Core module (enums, models, validation)
+│   ├── server.py       # FastAPI server
+│   └── core/           # Core module
 ├── outputs/
-│   └── synthesize/     # Audio cache directory
+│   └── synthesize/     # Audio cache
 ├── test_api.py         # Test script
-├── README.md           # This file
-└── requirements.txt     # Python dependencies
+├── Dockerfile          # Docker image
+├── requirements.txt    # Python deps
+└── README.md
 ```
 
 ## Dependencies
@@ -247,7 +188,6 @@ supertonic/
 - `fastapi>=0.100.0` - Web framework
 - `uvicorn>=0.22.0` - ASGI server
 - `requests>=2.31.0` - HTTP client
-- `pydantic>=2.0` - Data validation
 
 ## License
 
