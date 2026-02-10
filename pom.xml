@@ -45,7 +45,7 @@
     </dependencies>
 
     <build>
-        <sourceDirectory>.</sourceDirectory>
+        <sourceDirectory>src/main/java</sourceDirectory>
         <plugins>
             <!-- Maven Compiler Plugin -->
             <plugin>
@@ -64,7 +64,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.1.0</version>
                 <configuration>
-                    <mainClass>ExampleONNX</mainClass>
+                    <mainClass>supertonic.ExampleONNX</mainClass>
                 </configuration>
             </plugin>
 
@@ -76,7 +76,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>ExampleONNX</mainClass>
+                            <mainClass>supertonic.ExampleONNX</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
@@ -96,7 +96,7 @@
                         <configuration>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>ExampleONNX</mainClass>
+                                    <mainClass>supertonic.ExampleONNX</mainClass>
                                 </transformer>
                             </transformers>
                             <finalName>tts-example</finalName>
