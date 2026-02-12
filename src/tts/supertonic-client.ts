@@ -12,8 +12,10 @@ env.allowLocalModels = false; // Force checking remote/cache
 // This prevents pthread_setaffinity_np errors on some devices
 // Must be set before loading any ONNX models
 const numCpus = os.cpus().length;
-const numThreads = Math.min(numCpus, 4); // Limit to 4 threads max for stability
-process.env.ORT_NUM_THREADS = String(numThreads);
+const defaultThreads = Math.min(numCpus, 4); // Limit to 4 threads max for stability
+if (!process.env.ORT_NUM_THREADS) {
+    process.env.ORT_NUM_THREADS = String(defaultThreads);
+}
 
 /**
  * Internal client for Supertonic TTS using HuggingFace Transformers
@@ -36,6 +38,11 @@ class SupertonicTTS {
         if (!SupertonicTTS.instance) {
             SupertonicTTS.instance = await pipeline('text-to-speech', 'onnx-community/Supertonic-TTS-2-ONNX', {
                 device: 'cpu',
+                session_options: {
+                    intraOpNumThreads: Number(process.env.ORT_NUM_THREADS) || 1,
+                    interOpNumThreads: 1,
+                    executionMode: 'sequential',
+                }
             });
         }
         return SupertonicTTS.instance;

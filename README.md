@@ -102,6 +102,17 @@ bun run build:docker
 
 > **Note**: ARM64 standalone binaries have native module compatibility issues. Use Docker for ARM64 deployment.
 
+## Performance Tuning
+
+If you encounter `pthread_setaffinity_np` errors or high CPU usage on limited devices (e.g., Raspberry Pi, restricted containers), you can configure the number of threads used by the ONNX Runtime:
+
+```bash
+# Force usage of 1 thread to avoid affinity issues
+ORT_NUM_THREADS=1 bun run start
+```
+
+The service attempts to auto-detect a safe thread count (max 4), but explicit configuration may be required for some environments.
+
 ## License
 
 MIT
