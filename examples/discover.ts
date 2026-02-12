@@ -1,6 +1,6 @@
 /**
- * Supertonic Service Discovery
- * Finds instances of Supertonic running on the local network using mDNS
+ * Supertonic Service Discovery Utility
+ * Exports a function to find a server and return its IP address
  */
 
 import { createLibp2p } from "libp2p";
@@ -9,67 +9,57 @@ import { yamux } from "@chainsafe/libp2p-yamux";
 import { noise } from "@chainsafe/libp2p-noise";
 import { mdns } from "@libp2p/mdns";
 
-async function main() {
-  console.log("============================================================");
-  console.log("Supertonic Discovery Tool");
-  console.log("Searching for servers on the local network...");
-  console.log("============================================================\n");
-
+/**
+ * Searches for a Supertonic server on the local network
+ * @param timeoutMs How long to search before giving up (default 10s)
+ * @returns The IP address of the discovered server
+ */
+export async function discoverServer(timeoutMs: number = 10000): Promise<string> {
   const node = await createLibp2p({
     transports: [tcp()],
     streamMuxers: [yamux()],
     connectionEncrypters: [noise()],
-    peerDiscovery: [mdns()],
+    peerDiscovery: [
+      mdns({
+        interval: 1000,
+      })
+    ],
   });
 
   await node.start();
-  console.log("Local discovery node started. Waiting for peers...\n");
 
-  node.addEventListener("peer:discovery", (event: any) => {
-    const peer = event.detail;
-    console.log("------------------------------------------------------------");
-    console.log(`📡 Discovered Peer!`);
-    console.log(`ID: ${peer.id.toString()}`);
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(async () => {
+      await node.stop();
+      reject(new Error("Discovery timeout: No server found on the network"));
+    }, timeoutMs);
 
-    if (peer.multiaddrs && peer.multiaddrs.length > 0) {
-      console.log("Addresses:");
-      peer.multiaddrs.forEach((addr: any) => {
-        const addrStr = addr.toString();
-        process.stdout.write(`  - ${addrStr}`);
-
-        // Extract IP if possible
-        const ipMatch = addrStr.match(/\/ip4\/([0-9.]+)/);
-        if (ipMatch && ipMatch[1] !== "127.0.0.1") {
-          process.stdout.write(`  <-- PROBABLE IP: ${ipMatch[1]}`);
+    node.addEventListener("peer:discovery", async (event: any) => {
+      const peer = event.detail;
+      
+      if (peer.multiaddrs && peer.multiaddrs.length > 0) {
+        for (const addr of peer.multiaddrs) {
+          const addrStr = addr.toString();
+          const ipMatch = addrStr.match(/\/ip4\/([0-9.]+)/);
+          
+          // Ignoramos localhost (127.0.0.1) para obtener la IP de la red
+          if (ipMatch && ipMatch[1] !== "127.0.0.1") {
+            const foundIp = ipMatch[1];
+            clearTimeout(timeout);
+            await node.stop();
+            resolve(foundIp);
+            return;
+          }
         }
-        process.stdout.write("\n");
-      });
-
-      console.log("\nTo use this server with the client:");
-      const firstExternalAddr = peer.multiaddrs.find(
-        (a: any) => !a.toString().includes("127.0.0.1"),
-      );
-      const ip = firstExternalAddr
-        ? firstExternalAddr.toString().match(/\/ip4\/([0-9.]+)/)?.[1]
-        : "localhost";
-
-      console.log(
-        `HTTP Mode: SERVER_URL=http://${ip}:3000 bun run examples/client.ts`,
-      );
-      console.log(`P2P Mode:  LIBP2P_MODE=true bun run examples/client.ts`);
-    }
-    console.log(
-      "------------------------------------------------------------\n",
-    );
-  });
-
-  // Keep running for a while
-  console.log("(Press Ctrl+C to stop discovery)\n");
-
-  process.on("SIGINT", async () => {
-    await node.stop();
-    process.exit(0);
+      }
+    });
   });
 }
 
-main().catch(console.error);
+// Permitir seguir usándolo como script independiente
+if (import.meta.main) {
+  console.log("Searching for server...");
+  discoverServer()
+    .then(ip => console.log(`\n✅ Found server at: ${ip}`))
+    .catch(err => console.error(`\n❌ ${err.message}`));
+}

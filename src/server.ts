@@ -65,7 +65,11 @@ async function initLibp2p() {
             transports: [tcp()],
             streamMuxers: [yamux()],
             connectionEncrypters: [noise()],
-            peerDiscovery: [mdns()],
+            peerDiscovery: [
+                mdns({
+                    interval: 1000, // Anunciarse cada 1 segundo
+                })
+            ],
         });
 
         node.addEventListener('peer:connect', (event: any) => {
