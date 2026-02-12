@@ -7,6 +7,7 @@ import { TTSService } from './tts/service.js';
 import type { LanguageDetector, LanguageDetectionResult } from './tts/service.js';
 import type { Language, SynthesisOptions } from './tts/types.js';
 import type { Libp2p } from 'libp2p';
+import type { Stream, Connection, PeerId } from '@libp2p/interface';
 
 // Libp2p TTS protocol types
 //type TTSMethod = 'synthesize' | 'synthesizeMixed' | 'getVoices' | 'health';
@@ -47,7 +48,14 @@ const OUTPUT_DIR = process.env.TTS_OUTPUT_DIR || './output';
 const DEFAULT_VOICE = process.env.TTS_DEFAULT_VOICE || 'F1';
 
 // Optional libp2p support
-let libp2pNode: any = null;
+let libp2pNode: Libp2p | null = null;
+
+// Interface for the stream as used in the code (read/write/close)
+interface NetworkStream {
+    read(): Promise<Uint8Array | null>;
+    write(data: Uint8Array | Buffer): Promise<void>;
+    close(): void;
+}
 
 async function initLibp2p() {
     try {
@@ -72,18 +80,19 @@ async function initLibp2p() {
             ],
         });
 
-        node.addEventListener('peer:connect', (event: any) => {
-            console.log(`Connected to peer: ${event.detail.remotePeer.toString()}`);
+        node.addEventListener('peer:connect', (event: CustomEvent<PeerId>) => {
+            console.log(`Connected to peer: ${event.detail.toString()}`);
         });
 
-        node.addEventListener('peer:disconnect', (event: any) => {
-            console.log(`Disconnected from peer: ${event.detail.remotePeer.toString()}`);
+        node.addEventListener('peer:disconnect', (event: CustomEvent<PeerId>) => {
+            console.log(`Disconnected from peer: ${event.detail.toString()}`);
         });
 
         await node.start();
 
         // Register TTS protocol handler for libp2p
-        node.handle('/tts/1.0.0', async (stream: any) => {
+        // @ts-ignore - Handler signature type mismatch with standard Libp2p but works with this implementation
+        node.handle('/tts/1.0.0', async (stream: NetworkStream) => {
             try {
                 // Read request: accumulate data until newline
                 let buffer = Buffer.alloc(0);
@@ -105,12 +114,13 @@ async function initLibp2p() {
                     return;
                 }
 
-                let response: any = { success: false };
+                let response: TTSResponse = { success: false, error: 'Unknown error' };
                 try {
                     const request = JSON.parse(requestText) as TTSRequest;
                     switch (request.method) {
                         case 'synthesize': {
-                            const { text, voice = DEFAULT_VOICE, filename = 'output', options = {}, language, writeToFile = false } = request.params;
+                            const params = request.params as SynthesizeParams;
+                            const { text, voice = DEFAULT_VOICE, filename = 'output', options = {}, language, writeToFile = false } = params;
                             if (!text) throw new Error('Missing required parameter: text');
                             const result = await ttsService.synthesize(text, voice, filename, options, language, writeToFile);
                             response = {
@@ -124,7 +134,8 @@ async function initLibp2p() {
                             break;
                         }
                         case 'synthesizeMixed': {
-                            const { taggedText, voice = DEFAULT_VOICE, filename = 'output', options = {}, silenceDuration = 0.3, writeToFile = false } = request.params;
+                            const params = request.params as SynthesizeMixedParams;
+                            const { taggedText, voice = DEFAULT_VOICE, filename = 'output', options = {}, silenceDuration = 0.3, writeToFile = false } = params;
                             if (!taggedText) throw new Error('Missing required parameter: taggedText');
                             const result = await ttsService.synthesizeMixed(taggedText, voice, filename, options, silenceDuration, writeToFile);
                             response = {
@@ -158,10 +169,11 @@ async function initLibp2p() {
                         default:
                             throw new Error(`Unknown method: ${(request as any).method}`);
                     }
-                } catch (error: any) {
+                } catch (error: unknown) {
+                    const errorMessage = error instanceof Error ? error.message : 'Internal Server Error';
                     response = {
                         success: false,
-                        error: error.message || 'Internal Server Error'
+                        error: errorMessage
                     };
                 }
 
@@ -190,9 +202,10 @@ async function initLibp2p() {
         console.log('='.repeat(60));
 
         return node;
-    } catch (error: any) {
-        console.error('Failed to start libp2p node:', error.message);
-        if (error.code === 'MODULE_NOT_FOUND') {
+    } catch (error: unknown) {
+        const err = error as Error & { code?: string };
+        console.error('Failed to start libp2p node:', err.message);
+        if (err.code === 'MODULE_NOT_FOUND') {
             console.log('Note: Install libp2p packages to enable P2P: bun add libp2p @libp2p/tcp @libp2p/yamux @chainsafe/libp2p-noise');
         }
         return null;

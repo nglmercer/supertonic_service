@@ -34,7 +34,10 @@ export async function discoverServer(timeoutMs: number = 10000): Promise<string>
       reject(new Error("Discovery timeout: No server found on the network"));
     }, timeoutMs);
 
-    node.addEventListener("peer:discovery", async (event: any) => {
+  interface PeerDiscoveryEvent {
+      multiaddrs: { toString(): string }[];
+    }
+    node.addEventListener("peer:discovery", async (event: CustomEvent<PeerDiscoveryEvent>) => {
       const peer = event.detail;
       
       if (peer.multiaddrs && peer.multiaddrs.length > 0) {
@@ -42,8 +45,7 @@ export async function discoverServer(timeoutMs: number = 10000): Promise<string>
           const addrStr = addr.toString();
           const ipMatch = addrStr.match(/\/ip4\/([0-9.]+)/);
           
-          // Ignoramos localhost (127.0.0.1) para obtener la IP de la red
-          if (ipMatch && ipMatch[1] !== "127.0.0.1") {
+          if (ipMatch && ipMatch[1] && ipMatch[1] !== "127.0.0.1") {
             const foundIp = ipMatch[1];
             clearTimeout(timeout);
             await node.stop();

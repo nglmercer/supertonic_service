@@ -17,12 +17,16 @@ if (!process.env.ORT_NUM_THREADS) {
     process.env.ORT_NUM_THREADS = String(defaultThreads);
 }
 
+
+// Type alias for the specific pipeline we are using
+type TextToSpeechPipeline = Awaited<ReturnType<typeof pipeline>>;
+
 /**
  * Internal client for Supertonic TTS using HuggingFace Transformers
  * Implements singleton pattern for the pipeline to avoid reinitialization
  */
 class SupertonicTTS {
-    private static instance: any = null;
+    private static instance: TextToSpeechPipeline | null = null;
     private readonly baseUrl: string;
     private defaultVoice: string;
 
@@ -34,7 +38,7 @@ class SupertonicTTS {
     /**
      * Initialize the TTS pipeline (singleton)
      */
-    private async getPipeline() {
+    private async getPipeline(): Promise<TextToSpeechPipeline> {
         if (!SupertonicTTS.instance) {
             SupertonicTTS.instance = await pipeline('text-to-speech', 'onnx-community/Supertonic-TTS-2-ONNX', {
                 device: 'cpu',

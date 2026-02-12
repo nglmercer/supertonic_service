@@ -59,7 +59,7 @@ type TTSRequest<M extends keyof TTSServiceMap = keyof TTSServiceMap> = {
   params: TTSServiceMap[M]['params'];
 };
 
-type TTSResponse<T = any> = 
+type TTSResponse<T = unknown> = 
   | { success: true; result: T }
   | { success: false; error: string };
 
@@ -108,7 +108,7 @@ class HTTPClient {
     params: TTSServiceMap[M]['params']
   ): Promise<TTSServiceMap[M]['result']> {
     let endpoint: string;
-    let body: any;
+    let body: unknown;
 
     switch (method) {
       case 'synthesize':
@@ -137,10 +137,11 @@ class HTTPClient {
       body: method === 'getVoices' || method === 'health' ? undefined : JSON.stringify(params),
     });
 
-    const data = await response.json() as any;
+    const data = await response.json() as Record<string, unknown> & { success?: boolean; error?: unknown; voices?: string[] };
 
     if (!response.ok || data.success === false) {
-      throw new Error(data.error?.message || data.error || `HTTP ${response.status}`);
+       const errorMessage = typeof data.error === 'string' ? data.error : (data.error as any)?.message || `HTTP ${response.status}`;
+       throw new Error(errorMessage);
     }
 
     // Handle different response formats
