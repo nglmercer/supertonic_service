@@ -64,6 +64,24 @@ export function parseLanguageSegments(taggedText: string): Array<{ lang: Languag
 }
 
 /**
+ * Find the data chunk in a WAV buffer
+ */
+function findDataChunk(buffer: Buffer): { offset: number; size: number } {
+    let offset = 12; // Skip RIFF header
+    while (offset < buffer.length - 8) {
+        const chunkId = buffer.toString('ascii', offset, offset + 4);
+        const chunkSize = buffer.readUInt32LE(offset + 4);
+        
+        if (chunkId === 'data') {
+            return { offset: offset + 8, size: chunkSize };
+        }
+        
+        offset += 8 + chunkSize;
+    }
+    throw new Error('No data chunk found in WAV buffer');
+}
+
+/**
  * Concatenate multiple WAV buffers into one
  * Skips headers of subsequent files and concatenates audio data
  */
@@ -73,17 +91,25 @@ export function concatenateWavBuffers(buffers: Buffer[]): Buffer {
 
     // Parse first WAV to get format info
     const firstBuffer = buffers[0]!;
-    const sampleRate = firstBuffer.readUInt32LE(24);
-    const bitsPerSample = firstBuffer.readUInt16LE(34);
+    const audioFormat = firstBuffer.readUInt16LE(20);
     const channels = firstBuffer.readUInt16LE(22);
-    const blockAlign = channels * bitsPerSample / 8;
-    const byteRate = sampleRate * blockAlign;
+    const sampleRate = firstBuffer.readUInt32LE(24);
+    const byteRate = firstBuffer.readUInt32LE(28);
+    const blockAlign = firstBuffer.readUInt16LE(32);
+    const bitsPerSample = firstBuffer.readUInt16LE(34);
 
-    // Calculate total data size
+    // Calculate total data size and validate chunks
     let totalDataSize = 0;
+    const dataChunks: { offset: number; size: number }[] = [];
+
     for (const buffer of buffers) {
-        const dataSize = buffer.readUInt32LE(40);
-        totalDataSize += dataSize;
+        try {
+            const chunk = findDataChunk(buffer);
+            dataChunks.push(chunk);
+            totalDataSize += chunk.size;
+        } catch (e) {
+            console.warn('Skipping invalid WAV buffer during concatenation');
+        }
     }
 
     // Create combined buffer
@@ -96,7 +122,8 @@ export function concatenateWavBuffers(buffers: Buffer[]): Buffer {
     combined.writeUInt32LE(36 + totalDataSize, 4);
     combined.write('WAVE', 8);
     combined.write('fmt ', 12);
-    combined.writeUInt32LE(16, 16);
+    combined.writeUInt32LE(16, 16); // Subchunk1Size
+    combined.writeUInt16LE(audioFormat, 20); // AudioFormat
     combined.writeUInt16LE(channels, 22);
     combined.writeUInt32LE(sampleRate, 24);
     combined.writeUInt32LE(byteRate, 28);
@@ -106,12 +133,14 @@ export function concatenateWavBuffers(buffers: Buffer[]): Buffer {
     combined.writeUInt32LE(totalDataSize, 40);
 
     // Concatenate audio data
-    let offset = headerSize;
-    for (const buffer of buffers) {
-        const dataSize = buffer.readUInt32LE(40);
-        const dataStart = 44; // WAV data starts at byte 44
-        buffer.copy(combined, offset, dataStart, dataStart + dataSize);
-        offset += dataSize;
+    let currentOffset = headerSize;
+    for (let i = 0; i < buffers.length; i++) {
+        if (i >= dataChunks.length) break;
+        const buffer = buffers[i]!;
+        const { offset: dataStart, size: dataSize } = dataChunks[i]!;
+        
+        buffer.copy(combined, currentOffset, dataStart, dataStart + dataSize);
+        currentOffset += dataSize;
     }
 
     return combined;

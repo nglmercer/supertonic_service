@@ -43,9 +43,11 @@ class SupertonicTTS {
             SupertonicTTS.instance = await pipeline('text-to-speech', 'onnx-community/Supertonic-TTS-2-ONNX', {
                 device: 'cpu',
                 session_options: {
-                    intraOpNumThreads: Number(process.env.ORT_NUM_THREADS) || 1,
-                    interOpNumThreads: 1,
-                    executionMode: 'sequential',
+                    // Optimized for CPU performance while maintaining compatibility
+                    intraOpNumThreads: Number(process.env.ORT_NUM_THREADS) || defaultThreads,
+                    interOpNumThreads: 1, // Keep inter-op low to reduce overhead for sequential models
+                    executionMode: 'sequential', // Sequential execution is more stable on limited devices
+                    graphOptimizationLevel: 'all', // Enable all graph optimizations (fusion, constant folding, etc.)
                 }
             });
         }

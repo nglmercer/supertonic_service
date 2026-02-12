@@ -179,7 +179,9 @@ export class TTSService {
 
             // Synthesize each segment separately
             const audioBuffers: Buffer[] = [];
-            for (const { lang, text } of segments) {
+            for (let i = 0; i < segments.length; i++) {
+                const { lang, text } = segments[i]!;
+
                 // Preprocess text for this language
                 const processedText = preprocessText(text, lang);
 
@@ -194,12 +196,14 @@ export class TTSService {
                 );
 
                 // Convert to buffer
-                const wavBuffer = audio.toWav();
-                audioBuffers.push(Buffer.from(wavBuffer));
+                const wavBuffer = Buffer.from(audio.toWav());
+                audioBuffers.push(wavBuffer);
 
                 // Add silence between segments (except after last segment)
-                if (segments.indexOf({ lang, text }) < segments.length - 1) {
-                    const silenceBuffer = createSilenceBuffer(silenceDuration);
+                if (i < segments.length - 1) {
+                    // Extract sample rate from the wav buffer (offset 24) to ensure compatibility
+                    const sampleRate = wavBuffer.readUInt32LE(24);
+                    const silenceBuffer = createSilenceBuffer(silenceDuration, sampleRate);
                     audioBuffers.push(silenceBuffer);
                 }
             }
