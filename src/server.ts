@@ -220,6 +220,19 @@ function initTTSService() {
 export async function handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url, `http://${req.headers.get('host')}`);
     const method = req.method;
+    
+    // Default CORS headers
+    const corsHeaders = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+    };
+
+    // Handle CORS preflight
+    if (method === 'OPTIONS') {
+        return new Response(null, { headers: corsHeaders });
+    }
+
     let body: any = null;
 
     if (method !== 'GET') {
@@ -250,7 +263,7 @@ export async function handleRequest(req: Request): Promise<Response> {
                 detectedLanguage: result.detectedLanguage,
             }), { 
                 status: 200, 
-                headers: { 'Content-Type': 'application/json' } 
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
             });
         }
 
@@ -266,7 +279,7 @@ export async function handleRequest(req: Request): Promise<Response> {
                 audioBase64: result.fileBuffer.toString('base64'),
             }), { 
                 status: 200, 
-                headers: { 'Content-Type': 'application/json' } 
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
             });
         }
 
@@ -274,7 +287,7 @@ export async function handleRequest(req: Request): Promise<Response> {
             const voices = await ttsService.getVoices();
             return new Response(JSON.stringify({ voices }), { 
                 status: 200, 
-                headers: { 'Content-Type': 'application/json' } 
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
             });
         }
 
@@ -285,7 +298,7 @@ export async function handleRequest(req: Request): Promise<Response> {
                 libp2p: libp2pNode ? 'enabled' : 'disabled'
             }), { 
                 status: 200, 
-                headers: { 'Content-Type': 'application/json' } 
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
             });
         }
 
@@ -294,7 +307,7 @@ export async function handleRequest(req: Request): Promise<Response> {
             error: { code: 404, message: 'Not Found' }
         }), { 
             status: 404, 
-            headers: { 'Content-Type': 'application/json' } 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         });
 
     } catch (error: any) {
@@ -308,7 +321,7 @@ export async function handleRequest(req: Request): Promise<Response> {
             }
         }), { 
             status: 500, 
-            headers: { 'Content-Type': 'application/json' } 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         });
     }
 }
@@ -325,6 +338,9 @@ async function main() {
 
     // Initialize TTS service first (before libp2p) to ensure it's ready for P2P requests
     initTTSService();
+
+    // Start libp2p node for discovery and P2P communication
+    libp2pNode = await initLibp2p();
 
     const server = Bun.serve({
         port: PORT,
