@@ -16,6 +16,7 @@
 
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
+import { discoverServer } from './discover.ts';
 
 // Define Language type (same as server)
 type Language = 'en' | 'ko' | 'es' | 'pt' | 'fr';
@@ -287,14 +288,28 @@ class Libp2pClient {
 type TTSClient = HTTPClient | Libp2pClient;
 
 async function createClient(): Promise<TTSClient> {
+  let finalServerUrl = SERVER_URL;
+
+  // Auto-discovery logic: if using default localhost and not in P2P mode, try to find a remote server
+  if (!LIBP2P_MODE && (SERVER_URL.includes('localhost') || SERVER_URL.includes('127.0.0.1'))) {
+    try {
+      console.log('🔍 Searching for a Supertonic server on the network...');
+      const ip = await discoverServer(3000); // Wait 3 seconds for discovery
+      finalServerUrl = `http://${ip}:3000`;
+      console.log(`📡 Auto-detected server at: ${finalServerUrl}`);
+    } catch (error) {
+      console.log('⚠️ No remote server discovered, falling back to local.');
+    }
+  }
+
   if (LIBP2P_MODE) {
     console.log('Mode: Libp2p P2P');
     const client = new Libp2pClient();
     await client.connect();
     return client;
   } else {
-    console.log(`Mode: HTTP (${SERVER_URL})`);
-    return new HTTPClient(SERVER_URL);
+    console.log(`🚀 Mode: HTTP (${finalServerUrl})`);
+    return new HTTPClient(finalServerUrl);
   }
 }
 
