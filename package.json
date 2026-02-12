@@ -9,6 +9,7 @@
     "dev": "NODE_ENV=development bun run src/server.ts",
     "demo": "bun run demo.ts",
     "client": "bun run examples/client.ts",
+    "discover": "bun run examples/discover.ts",
     "test": "bun test",
     "test:server": "bun test src/server.test.ts",
     "build": "bash scripts/build.sh current",

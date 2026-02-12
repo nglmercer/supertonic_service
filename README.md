@@ -13,12 +13,12 @@ Server runs at `http://localhost:3000`
 
 ## API Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/tts/synthesize` | Synthesize text to speech |
-| POST | `/api/tts/synthesize-mixed` | Synthesize mixed-language text |
-| GET | `/api/tts/voices` | List available voices |
-| GET | `/api/tts/health` | Health check |
+| Method | Endpoint                    | Description                    |
+| ------ | --------------------------- | ------------------------------ |
+| POST   | `/api/tts/synthesize`       | Synthesize text to speech      |
+| POST   | `/api/tts/synthesize-mixed` | Synthesize mixed-language text |
+| GET    | `/api/tts/voices`           | List available voices          |
+| GET    | `/api/tts/health`           | Health check                   |
 
 ### POST `/api/tts/synthesize`
 
@@ -31,6 +31,7 @@ Server runs at `http://localhost:3000`
 ```
 
 Response:
+
 ```json
 {
   "success": true,
@@ -52,22 +53,21 @@ Response:
 
 ## Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `text` | string | required | Text to synthesize |
-| `voice` | string | `F1` | Voice: `F1-F5`, `M1-M5` |
-| `language` | string | auto | `en`, `ko`, `es`, `pt`, `fr` |
-| `options.rate` | string | `0%` | Speed: `-50%` to `100%` |
-| `writeToFile` | boolean | `false` | Save to server output dir |
+| Parameter      | Type    | Default  | Description                  |
+| -------------- | ------- | -------- | ---------------------------- |
+| `text`         | string  | required | Text to synthesize           |
+| `voice`        | string  | `F1`     | Voice: `F1-F5`, `M1-M5`      |
+| `language`     | string  | auto     | `en`, `ko`, `es`, `pt`, `fr` |
+| `options.rate` | string  | `0%`     | Speed: `-50%` to `100%`      |
+| `writeToFile`  | boolean | `false`  | Save to server output dir    |
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3000` | Server port |
-| `HOST` | `0.0.0.0` | Server host |
+| Variable         | Default    | Description            |
+| ---------------- | ---------- | ---------------------- |
+| `PORT`           | `3000`     | Server port            |
+| `HOST`           | `0.0.0.0`  | Server host            |
 | `TTS_OUTPUT_DIR` | `./output` | Audio output directory |
-| `LIBP2P_ENABLED` | `false` | Enable P2P networking |
 
 ## Client Usage
 

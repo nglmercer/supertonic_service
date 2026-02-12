@@ -8,7 +8,6 @@
  *     SERVER_URL=http://localhost:3000 bun run examples/client.ts
  *
  *   Libp2p mode: Connects directly to server's libp2p node
- *     - Start server with LIBP2P_ENABLED=true
  *     - LIBP2P_SERVER=/ip4/127.0.0.1/tcp/9000/p2p/<peer-id> bun run examples/client.ts
  *     - Or for mDNS discovery: LIBP2P_MODE=true bun run examples/client.ts
  *

@@ -276,11 +276,6 @@ describe('Environment Configuration', () => {
         expect(DEFAULT_VOICE).toBe('M2');
     });
 
-    it('should correctly identify libp2p disabled state', () => {
-        const LIBP2P_ENABLED = process.env.LIBP2P_ENABLED === 'true';
-        expect(LIBP2P_ENABLED).toBe(false);
-    });
-
     it('should parse libp2p port correctly', () => {
         const LIBP2P_PORT = process.env.LIBP2P_PORT ? parseInt(process.env.LIBP2P_PORT) : 9000;
         expect(LIBP2P_PORT).toBe(9000);

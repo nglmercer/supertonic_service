@@ -1,7 +1,6 @@
 /**
  * HTTP Server Entry Point (with optional libp2p)
  * Starts the TTS service with HTTP API
- * Libp2p P2P networking is optional and only enabled if LIBP2P_ENABLED=true
  */
 
 import { TTSService } from './tts/service.js';
@@ -10,7 +9,7 @@ import type { Language, SynthesisOptions } from './tts/types.js';
 import type { Libp2p } from 'libp2p';
 
 // Libp2p TTS protocol types
-type TTSMethod = 'synthesize' | 'synthesizeMixed' | 'getVoices' | 'health';
+//type TTSMethod = 'synthesize' | 'synthesizeMixed' | 'getVoices' | 'health';
 
 interface SynthesizeParams {
   text: string;
@@ -43,7 +42,6 @@ type TTSResponse<T = any> =
 // Environment configuration
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 const HOST = process.env.HOST || '0.0.0.0';
-const LIBP2P_ENABLED = process.env.LIBP2P_ENABLED === 'true';
 const LIBP2P_PORT = process.env.LIBP2P_PORT ? parseInt(process.env.LIBP2P_PORT) : 9000;
 const OUTPUT_DIR = process.env.TTS_OUTPUT_DIR || './output';
 const DEFAULT_VOICE = process.env.TTS_DEFAULT_VOICE || 'F1';
@@ -52,11 +50,6 @@ const DEFAULT_VOICE = process.env.TTS_DEFAULT_VOICE || 'F1';
 let libp2pNode: any = null;
 
 async function initLibp2p() {
-    if (!LIBP2P_ENABLED) {
-        console.log('Libp2p disabled (set LIBP2P_ENABLED=true to enable)');
-        return null;
-    }
-
     try {
         // Dynamic imports to avoid requiring packages if not enabled
         const { createLibp2p } = await import('libp2p');
@@ -180,8 +173,16 @@ async function initLibp2p() {
 
         console.log('='.repeat(60));
         console.log('Libp2p node started');
-        console.log(`Listening on port ${LIBP2P_PORT}`);
         console.log(`Node ID: ${node.peerId.toString()}`);
+        console.log('Listening on:');
+        node.getMultiaddrs().forEach(ma => {
+            const addr = ma.toString();
+            if (addr.includes('127.0.0.1')) {
+                console.log(`  - ${addr} (Local)`);
+            } else {
+                console.log(`  - ${addr} (Network - Use this for Discovery!)`);
+            }
+        });
         console.log('='.repeat(60));
 
         return node;
@@ -325,12 +326,6 @@ async function main() {
     // Initialize TTS service first (before libp2p) to ensure it's ready for P2P requests
     initTTSService();
 
-    if (LIBP2P_ENABLED) {
-        libp2pNode = await initLibp2p();
-    } else {
-        console.log('Libp2p disabled (set LIBP2P_ENABLED=true to enable P2P networking)');
-    }
-
     const server = Bun.serve({
         port: PORT,
         hostname: HOST,
@@ -341,13 +336,24 @@ async function main() {
     console.log('Supertonic TTS Service Started');
     console.log('='.repeat(60));
     console.log(`HTTP Server listening on http://${HOST}:${PORT}`);
+    
+    // Get local IP for convenience
+    const { networkInterfaces } = await import('os');
+    const nets = networkInterfaces();
+    for (const name of Object.keys(nets)) {
+        for (const net of nets[name]!) {
+            if (net.family === 'IPv4' && !net.internal) {
+                console.log(`Network IP: http://${net.address}:${PORT}`);
+            }
+        }
+    }
+    
     console.log('');
     console.log('Available REST API Endpoints:');
-    console.log(`  POST http://localhost:${PORT}/api/tts/synthesize`);
-    console.log(`  POST http://localhost:${PORT}/api/tts/synthesize-mixed`);
-    console.log(`  GET  http://localhost:${PORT}/api/tts/voices`);
-    console.log(`  GET  http://localhost:${PORT}/api/tts/health`);
-    console.log(`  GET  http://${HOST}:${PORT}/health`);
+    console.log(`  POST /api/tts/synthesize`);
+    console.log(`  POST /api/tts/synthesize-mixed`);
+    console.log(`  GET  /api/tts/voices`);
+    console.log(`  GET  /api/tts/health`);
     console.log('='.repeat(60));
 
     process.on('SIGINT', async () => {
