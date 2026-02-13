@@ -9,7 +9,7 @@ bun install
 bun start
 ```
 
-Server runs at `http://localhost:3000`
+Server runs at `http://localhost:3001`
 
 ## API Endpoints
 
@@ -65,7 +65,7 @@ Response:
 
 | Variable         | Default    | Description            |
 | ---------------- | ---------- | ---------------------- |
-| `PORT`           | `3000`     | Server port            |
+| `PORT`           | `3001`     | Server port            |
 | `HOST`           | `0.0.0.0`  | Server host            |
 | `TTS_OUTPUT_DIR` | `./output` | Audio output directory |
 
@@ -76,7 +76,7 @@ Response:
 bun run client
 
 # Custom server URL
-SERVER_URL=http://localhost:3000 bun run client
+SERVER_URL=http://localhost:3001 bun run client
 ```
 
 The client saves audio files locally from the base64 response.
@@ -85,7 +85,7 @@ The client saves audio files locally from the base64 response.
 
 ```bash
 docker build -t supertonic .
-docker run -p 3000:3000 supertonic
+docker run -p 3001:3001 supertonic
 ```
 
 Multi-platform (x86_64 and ARM64) supported.

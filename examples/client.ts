@@ -5,10 +5,10 @@
  * Usage:
  *   HTTP mode (default): Connects to HTTP server
  *     bun run examples/client.ts
- *     SERVER_URL=http://localhost:3000 bun run examples/client.ts
+ *     SERVER_URL=http://localhost:3001 bun run examples/client.ts
  *
  *   Libp2p mode: Connects directly to server's libp2p node
- *     - LIBP2P_SERVER=/ip4/127.0.0.1/tcp/9000/p2p/<peer-id> bun run examples/client.ts
+ *     - LIBP2P_SERVER=/ip4/127.0.0.1/tcp/9001/p2p/<peer-id> bun run examples/client.ts
  *     - Or for mDNS discovery: LIBP2P_MODE=true bun run examples/client.ts
  *
  * Run with: bun run examples/client.ts
@@ -232,16 +232,14 @@ class Libp2pClient {
         try {
             // Send request
             const request = JSON.stringify({ method, params }) + '\n';
-            await stream.write(Buffer.from(request));
+            stream.send(new TextEncoder().encode(request));
 
             // Read response: accumulate until newline
             let buffer = Buffer.alloc(0);
             let responseText: string | null = null;
 
-            while (true) {
-                const chunk = await stream.read();
-                if (chunk === null) break;
-                buffer = Buffer.concat([buffer, Buffer.from(chunk)]);
+            for await (const chunk of stream) {
+                buffer = Buffer.concat([buffer, Buffer.from(chunk.subarray())]);
                 const newlineIndex = buffer.indexOf(10); // newline character
                 if (newlineIndex !== -1) {
                     responseText = buffer.toString('utf8', 0, newlineIndex);
@@ -261,7 +259,7 @@ class Libp2pClient {
                 throw new Error(response.error);
             }
         } finally {
-            stream.close();
+            await stream.close();
         }
     }
 
@@ -410,4 +408,6 @@ async function main(): Promise<void> {
     }
 }
 
-main().catch(console.error);
+if (import.meta.main){
+    main().catch(console.error);
+}

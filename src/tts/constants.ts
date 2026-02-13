@@ -91,11 +91,11 @@ export const ENV_VARS = {
  */
 export const DEFAULTS = {
   // Server
-  PORT: 3000,
+  PORT: 3001,
   HOST: '0.0.0.0',
   
   // Libp2p
-  LIBP2P_PORT: 9000,
+  LIBP2P_PORT: 9001,
   
   // TTS
   DEFAULT_VOICE: 'F1',
@@ -104,7 +104,7 @@ export const DEFAULTS = {
   DEFAULT_SILENCE_DURATION_MIXED: 0.5,
   
   // Client
-  DEFAULT_SERVER_URL: 'http://localhost:3000',
+  DEFAULT_SERVER_URL: 'http://localhost:3001',
   DEFAULT_CLIENT_OUTPUT_DIR: './output',
   
   // Discovery

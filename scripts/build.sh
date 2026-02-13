@@ -100,7 +100,7 @@ build_docker() {
         echo -e "${GREEN}✓ Docker image built successfully${NC}"
         echo ""
         echo "Run with:"
-        echo "  docker run -p 3000:3000 supertonic:latest"
+        echo "  docker run -p 3001:3001 supertonic:latest"
     else
         echo -e "${RED}✗ Failed to build Docker image${NC}"
         return 1
@@ -227,7 +227,7 @@ cat > ${BUILD_DIR}/start.sh << 'EOF'
 # Supertonic TTS Service Startup Script
 
 # Default configuration
-export PORT=${PORT:-3000}
+export PORT=${PORT:-3001}
 export HOST=${HOST:-0.0.0.0}
 export TTS_OUTPUT_DIR=${TTS_OUTPUT_DIR:-./output}
 export TTS_DEFAULT_VOICE=${TTS_DEFAULT_VOICE:-F1}
@@ -293,7 +293,7 @@ The startup script automatically detects your architecture and runs the correct 
 
 ## Environment Variables
 
-- `PORT` - Server port (default: 3000)
+- `PORT` - Server port (default: 3001)
 - `HOST` - Server host (default: 0.0.0.0)
 - `TTS_OUTPUT_DIR` - Output directory for audio files (default: ./output)
 - `TTS_DEFAULT_VOICE` - Default voice (default: F1)
@@ -309,7 +309,7 @@ The startup script automatically detects your architecture and runs the correct 
 
 ```bash
 docker build -t supertonic .
-docker run -p 3000:3000 supertonic
+docker run -p 3001:3001 supertonic
 ```
 
 ## Native Libraries
@@ -339,5 +339,5 @@ echo "  ./dist/supertonic-linux-arm64"
 echo ""
 echo -e "${YELLOW}Note: For ARM64 deployment, Docker is recommended:${NC}"
 echo "  docker build -t supertonic ."
-echo "  docker run -p 3000:3000 supertonic"
+echo "  docker run -p 3001:3001 supertonic"
 echo ""

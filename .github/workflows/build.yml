@@ -99,15 +99,15 @@ jobs:
           # Start server in background using source code (not compiled binary)
           docker run --rm --platform linux/arm64 -d --name supertonic-test \
             -v $(pwd):/app -w /app \
-            -p 3000:3000 \
-            -e PORT=3000 -e HOST=0.0.0.0 \
+            -p 3001:3001 \
+            -e PORT=3001 -e HOST=0.0.0.0 \
             oven/bun:${{ env.BUN_VERSION }} \
             bash -c "bun install && bun run src/server.ts"
           
           # Wait for server to start (increased timeout)
           echo "Waiting for server to start..."
           for i in {1..30}; do
-            if curl -s http://localhost:3000/health > /dev/null 2>&1; then
+            if curl -s http://localhost:3001/health > /dev/null 2>&1; then
               echo "Server is ready!"
               break
             fi
@@ -116,7 +116,7 @@ jobs:
           done
           
           # Test health endpoint
-          curl -f http://localhost:3000/health || exit 1
+          curl -f http://localhost:3001/health || exit 1
           
           # Stop container
           docker stop supertonic-test
@@ -188,7 +188,7 @@ jobs:
           # Create startup script
           cat > start.sh << 'EOF'
           #!/bin/bash
-          export PORT=${PORT:-3000}
+          export PORT=${PORT:-3001}
           export HOST=${HOST:-0.0.0.0}
           export TTS_OUTPUT_DIR=${TTS_OUTPUT_DIR:-./output}
           export TTS_DEFAULT_VOICE=${TTS_DEFAULT_VOICE:-F1}
@@ -214,7 +214,7 @@ jobs:
             Use Docker instead:
             ```bash
             docker pull ghcr.io/${{ github.repository }}:${{ github.event.release.tag_name }}
-            docker run -p 3000:3000 ghcr.io/${{ github.repository }}:${{ github.event.release.tag_name }}
+            docker run -p 3001:3001 ghcr.io/${{ github.repository }}:${{ github.event.release.tag_name }}
             ```
           files: |
             ./supertonic-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz

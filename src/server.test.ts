@@ -97,24 +97,24 @@ describe('Request Body Validation', () => {
 
 describe('URL Path Parsing', () => {
     it('should parse synthesize endpoint', () => {
-        const url = new URL('http://localhost:3000/api/tts/synthesize', 'http://localhost:3000');
+        const url = new URL('http://localhost:3001/api/tts/synthesize', 'http://localhost:3001');
         expect(url.pathname).toBe('/api/tts/synthesize');
     });
 
     it('should parse synthesize-mixed endpoint', () => {
-        const url = new URL('http://localhost:3000/api/tts/synthesize-mixed', 'http://localhost:3000');
+        const url = new URL('http://localhost:3001/api/tts/synthesize-mixed', 'http://localhost:3001');
         expect(url.pathname).toBe('/api/tts/synthesize-mixed');
     });
 
     it('should parse voices endpoint', () => {
-        const url = new URL('http://localhost:3000/api/tts/voices', 'http://localhost:3000');
+        const url = new URL('http://localhost:3001/api/tts/voices', 'http://localhost:3001');
         expect(url.pathname).toBe('/api/tts/voices');
     });
 
     it('should parse health endpoints', () => {
-        const health1 = new URL('http://localhost:3000/api/tts/health', 'http://localhost:3000');
-        const health2 = new URL('http://localhost:3000/api/health', 'http://localhost:3000');
-        const health3 = new URL('http://localhost:3000/health', 'http://localhost:3000');
+        const health1 = new URL('http://localhost:3001/api/tts/health', 'http://localhost:3001');
+        const health2 = new URL('http://localhost:3001/api/health', 'http://localhost:3001');
+        const health3 = new URL('http://localhost:3001/health', 'http://localhost:3001');
         
         expect(health1.pathname).toBe('/api/tts/health');
         expect(health2.pathname).toBe('/api/health');
@@ -122,19 +122,19 @@ describe('URL Path Parsing', () => {
     });
 
     it('should return false for unknown routes', () => {
-        const unknown = new URL('http://localhost:3000/unknown/route', 'http://localhost:3000');
+        const unknown = new URL('http://localhost:3001/unknown/route', 'http://localhost:3001');
         expect(unknown.pathname.startsWith('/api/tts/')).toBe(false);
     });
 });
 
 describe('HTTP Method Validation', () => {
     it('should identify GET requests', () => {
-        const getRequest = new Request('http://localhost:3000/health', { method: 'GET' });
+        const getRequest = new Request('http://localhost:3001/health', { method: 'GET' });
         expect(getRequest.method).toBe('GET');
     });
 
     it('should identify POST requests', () => {
-        const postRequest = new Request('http://localhost:3000/api/tts/synthesize', { 
+        const postRequest = new Request('http://localhost:3001/api/tts/synthesize', { 
             method: 'POST',
             body: JSON.stringify({ text: 'test' }),
         });
@@ -142,9 +142,9 @@ describe('HTTP Method Validation', () => {
     });
 
     it('should identify non-GET requests', () => {
-        const postRequest = new Request('http://localhost:3000/api/tts/synthesize', { method: 'POST' });
-        const putRequest = new Request('http://localhost:3000/api/tts/synthesize', { method: 'PUT' });
-        const deleteRequest = new Request('http://localhost:3000/api/tts/synthesize', { method: 'DELETE' });
+        const postRequest = new Request('http://localhost:3001/api/tts/synthesize', { method: 'POST' });
+        const putRequest = new Request('http://localhost:3001/api/tts/synthesize', { method: 'PUT' });
+        const deleteRequest = new Request('http://localhost:3001/api/tts/synthesize', { method: 'DELETE' });
         
         expect(postRequest.method !== 'GET').toBe(true);
         expect(putRequest.method !== 'GET').toBe(true);
@@ -155,7 +155,7 @@ describe('HTTP Method Validation', () => {
 describe('JSON Body Parsing', () => {
     it('should parse valid JSON body', async () => {
         const body = { text: 'Hello', voice: 'F1' };
-        const request = new Request('http://localhost:3000/api/tts/synthesize', {
+        const request = new Request('http://localhost:3001/api/tts/synthesize', {
             method: 'POST',
             body: JSON.stringify(body),
             headers: { 'Content-Type': 'application/json' },
@@ -167,7 +167,7 @@ describe('JSON Body Parsing', () => {
     });
 
     it('should handle invalid JSON body gracefully', async () => {
-        const request = new Request('http://localhost:3000/api/tts/synthesize', {
+        const request = new Request('http://localhost:3001/api/tts/synthesize', {
             method: 'POST',
             body: 'invalid json',
             headers: { 'Content-Type': 'application/json' },
@@ -240,8 +240,8 @@ describe('Response Structure', () => {
 
 describe('Environment Configuration', () => {
     it('should have correct default port', () => {
-        const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
-        expect(PORT).toBe(3000);
+        const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
+        expect(PORT).toBe(3001);
     });
 
     it('should have correct default host', () => {
@@ -265,7 +265,7 @@ describe('Environment Configuration', () => {
         const customOutput = '/custom/output';
         const customVoice = 'M2';
         
-        const PORT = customPort ? parseInt(customPort) : 3000;
+        const PORT = customPort ? parseInt(customPort) : 3001;
         const HOST = customHost || '0.0.0.0';
         const OUTPUT_DIR = customOutput || './output';
         const DEFAULT_VOICE = customVoice || 'F1';
@@ -277,8 +277,8 @@ describe('Environment Configuration', () => {
     });
 
     it('should parse libp2p port correctly', () => {
-        const LIBP2P_PORT = process.env.LIBP2P_PORT ? parseInt(process.env.LIBP2P_PORT) : 9000;
-        expect(LIBP2P_PORT).toBe(9000);
+        const LIBP2P_PORT = process.env.LIBP2P_PORT ? parseInt(process.env.LIBP2P_PORT) : 9001;
+        expect(LIBP2P_PORT).toBe(9001);
     });
 });
 

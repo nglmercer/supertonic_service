@@ -24,9 +24,9 @@ import {
 } from './tts/constants.js';
 
 // Environment configuration
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
 const HOST = process.env.HOST || '0.0.0.0';
-const LIBP2P_PORT = process.env.LIBP2P_PORT ? parseInt(process.env.LIBP2P_PORT) : 9000;
+const LIBP2P_PORT = process.env.LIBP2P_PORT ? parseInt(process.env.LIBP2P_PORT) : 9001;
 const OUTPUT_DIR = process.env.TTS_OUTPUT_DIR || './output';
 const DEFAULT_VOICE = process.env.TTS_DEFAULT_VOICE || 'F1';
 

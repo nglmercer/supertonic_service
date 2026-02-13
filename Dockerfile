@@ -37,16 +37,16 @@ RUN mkdir -p /app/output
 
 # Set environment variables
 ENV NODE_ENV=production
-ENV PORT=3000
+ENV PORT=3001
 ENV HOST=0.0.0.0
 ENV TTS_OUTPUT_DIR=/app/output
 
 # Expose port
-EXPOSE 3000
+EXPOSE 3001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+    CMD curl -f http://localhost:3001/health || exit 1
 
 # Run the server
 CMD ["bun", "run", "src/server.ts"]
