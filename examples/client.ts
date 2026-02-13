@@ -17,147 +17,119 @@
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { discoverServer } from './discover.ts';
+import {
+    ENV_VARS,
+    DEFAULTS,
+    API_ENDPOINTS,
+    TTS_METHODS,
+    PROTOCOLS,
+    ERROR_MESSAGES,
+    CONTENT_TYPES,
+} from '../src/tts/constants.js';
 
-// Define Language type (same as server)
-type Language = 'en' | 'ko' | 'es' | 'pt' | 'fr';
-
-// SynthesisOptions (same as server)
-interface SynthesisOptions {
-  rate?: string;
-  volume?: string;
-  pitch?: string;
-}
-
-// Protocol types
-interface SynthesizeParams {
-  text: string;
-  voice?: string;
-  filename?: string;
-  options?: SynthesisOptions;
-  language?: Language;
-  writeToFile?: boolean;
-}
-
-interface SynthesizeMixedParams {
-  taggedText: string;
-  voice?: string;
-  filename?: string;
-  options?: SynthesisOptions;
-  silenceDuration?: number;
-  writeToFile?: boolean;
-}
-
-type TTSServiceMap = {
-  synthesize: { params: SynthesizeParams; result: { savedPath: string | null; audioBase64: string; detectedLanguage: Language } };
-  synthesizeMixed: { params: SynthesizeMixedParams; result: { savedPath: string | null; audioBase64: string } };
-  getVoices: { params: Record<string, never>; result: { voices: string[] } };
-  health: { params: Record<string, never>; result: { status: string; timestamp: string; libp2p?: string } };
-};
-
-type TTSRequest<M extends keyof TTSServiceMap = keyof TTSServiceMap> = {
-  method: M;
-  params: TTSServiceMap[M]['params'];
-};
-
-type TTSResponse<T = unknown> = 
-  | { success: true; result: T }
-  | { success: false; error: string };
-
-// Configuration
-const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3000';
-const LIBP2P_SERVER = process.env.LIBP2P_SERVER;
-const LIBP2P_MODE = process.env.LIBP2P_MODE === 'true' || !!LIBP2P_SERVER;
-const OUTPUT_DIR = process.env.OUTPUT_DIR || './output';
-
+// Import shared types from the server
+import type {
+    TTSMethod,
+    TTSParamsMap,
+    TTSResultMap,
+    TTSResponse,
+    VoiceKey,
+} from '../src/tts/types.js';
+import type { Libp2p } from 'libp2p';
+import type { PeerInfo } from '@libp2p/interface';
+import { multiaddr } from '@multiformats/multiaddr';
 // ============================================================================
 // Audio File Helper
 // ============================================================================
 
 function saveAudioFile(base64Data: string, filename: string): string {
-  // Ensure output directory exists
-  if (!existsSync(OUTPUT_DIR)) {
-    mkdirSync(OUTPUT_DIR, { recursive: true });
-  }
+    // Ensure output directory exists
+    if (!existsSync(OUTPUT_DIR)) {
+        mkdirSync(OUTPUT_DIR, { recursive: true });
+    }
 
-  // Decode base64 to buffer
-  const buffer = Buffer.from(base64Data, 'base64');
-  
-  // Generate unique filename with timestamp
-  const timestamp = Date.now();
-  const fullPath = join(OUTPUT_DIR, `${filename}_${timestamp}.wav`);
-  
-  // Write file
-  writeFileSync(fullPath, buffer);
-  
-  return fullPath;
+    // Decode base64 to buffer
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    // Generate unique filename with timestamp
+    const timestamp = Date.now();
+    const fullPath = join(OUTPUT_DIR, `${filename}_${timestamp}.wav`);
+
+    // Write file
+    writeFileSync(fullPath, buffer);
+
+    return fullPath;
 }
+
+// ============================================================================
+// Configuration - using constants
+// ============================================================================
+
+const SERVER_URL = process.env[ENV_VARS.SERVER_URL] || DEFAULTS.DEFAULT_SERVER_URL;
+const LIBP2P_SERVER = process.env[ENV_VARS.LIBP2P_SERVER];
+const LIBP2P_MODE = process.env[ENV_VARS.LIBP2P_MODE] === 'true' || LIBP2P_SERVER !== undefined;
+const OUTPUT_DIR = process.env[ENV_VARS.OUTPUT_DIR] || DEFAULTS.DEFAULT_CLIENT_OUTPUT_DIR;
 
 // ============================================================================
 // HTTP Client Implementation
 // ============================================================================
 
 class HTTPClient {
-  private baseUrl: string;
+    private baseUrl: string;
 
-  constructor(baseUrl: string) {
-    this.baseUrl = baseUrl;
-  }
-
-  async call<M extends keyof TTSServiceMap>(
-    method: M, 
-    params: TTSServiceMap[M]['params']
-  ): Promise<TTSServiceMap[M]['result']> {
-    let endpoint: string;
-    let body: unknown;
-
-    switch (method) {
-      case 'synthesize':
-        endpoint = '/api/tts/synthesize';
-        body = params;
-        break;
-      case 'synthesizeMixed':
-        endpoint = '/api/tts/synthesize-mixed';
-        body = params;
-        break;
-      case 'getVoices':
-        endpoint = '/api/tts/voices';
-        break;
-      case 'health':
-        endpoint = '/api/tts/health';
-        break;
-      default:
-        throw new Error(`Unknown method: ${method}`);
+    constructor(baseUrl: string) {
+        this.baseUrl = baseUrl;
     }
 
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      method: method === 'getVoices' || method === 'health' ? 'GET' : 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: method === 'getVoices' || method === 'health' ? undefined : JSON.stringify(params),
-    });
+    async call<M extends TTSMethod>(
+        method: M,
+        params: TTSParamsMap[M]
+    ): Promise<TTSResultMap[M]> {
+        let endpoint: string;
+        const isGetRequest = method === TTS_METHODS.GET_VOICES || method === TTS_METHODS.HEALTH;
 
-    const data = await response.json() as Record<string, unknown> & { success?: boolean; error?: unknown; voices?: string[] };
+        switch (method) {
+            case TTS_METHODS.SYNTHESIZE:
+                endpoint = API_ENDPOINTS.SYNTHESIZE;
+                break;
+            case TTS_METHODS.SYNTHESIZE_MIXED:
+                endpoint = API_ENDPOINTS.SYNTHESIZE_MIXED;
+                break;
+            case TTS_METHODS.GET_VOICES:
+                endpoint = API_ENDPOINTS.VOICES;
+                break;
+            case TTS_METHODS.HEALTH:
+                endpoint = API_ENDPOINTS.HEALTH;
+                break;
+            default:
+                // Exhaustiveness check
+                const exhaustiveCheck: never = method;
+                throw new Error(`Unknown method: ${exhaustiveCheck}`);
+        }
 
-    if (!response.ok || data.success === false) {
-       const errorMessage = typeof data.error === 'string' ? data.error : (data.error as any)?.message || `HTTP ${response.status}`;
-       throw new Error(errorMessage);
+        const response = await fetch(`${this.baseUrl}${endpoint}`, {
+            method: isGetRequest ? 'GET' : 'POST',
+            headers: {
+                'Content-Type': CONTENT_TYPES.JSON,
+            },
+            body: isGetRequest ? undefined : JSON.stringify(params),
+        });
+
+        const data = await response.json() as TTSResponse<M>;
+
+        if (!response.ok || data.success === false) {
+            const errorMessage = data.success === false 
+                ? data.error 
+                : `HTTP ${response.status}`;
+            throw new Error(errorMessage);
+        }
+
+        return data.result;
     }
 
-    // Handle different response formats
-    if (method === 'getVoices') {
-      return { voices: data.voices || data } as TTSServiceMap[M]['result'];
+    async close(): Promise<void> {
+        // No cleanup needed for HTTP
     }
-    if (method === 'health') {
-      return data as TTSServiceMap[M]['result'];
-    }
-    
-    return data as TTSServiceMap[M]['result'];
-  }
-
-  async close() {
-    // No cleanup needed for HTTP
-  }
 }
 
 // ============================================================================
@@ -165,121 +137,140 @@ class HTTPClient {
 // ============================================================================
 
 class Libp2pClient {
-  private node: any;
-  private serverMultiaddr: any;
+    private node: Libp2p | null = null;
+    private serverMultiaddr: string | null = null;
 
-  async connect(): Promise<void> {
-    // Dynamic imports
-    const { createLibp2p } = await import('libp2p');
-    const { tcp } = await import('@libp2p/tcp');
-    const { yamux } = await import('@chainsafe/libp2p-yamux');
-    const { noise } = await import('@chainsafe/libp2p-noise');
-    const { mdns } = await import('@libp2p/mdns');
+    async connect(): Promise<void> {
+        // Dynamic imports
+        const { createLibp2p } = await import('libp2p');
+        const { tcp } = await import('@libp2p/tcp');
+        const { yamux } = await import('@chainsafe/libp2p-yamux');
+        const { noise } = await import('@chainsafe/libp2p-noise');
+        const { mdns } = await import('@libp2p/mdns');
 
-    if (LIBP2P_SERVER) {
-      // Direct connection mode
-      this.node = await createLibp2p({
-        transports: [tcp()],
-        streamMuxers: [yamux()],
-        connectionEncrypters: [noise()],
-      });
-      await this.node.start();
-      console.log('Client libp2p node started');
-      console.log('Node ID:', this.node.peerId.toString());
-      this.serverMultiaddr = LIBP2P_SERVER;
-      console.log(`Using LIBP2P_SERVER: ${this.serverMultiaddr}`);
-    } else {
-      // mDNS discovery mode
-      console.log('No LIBP2P_SERVER set, starting mDNS discovery...');
-      
-      this.node = await createLibp2p({
-        transports: [tcp()],
-        streamMuxers: [yamux()],
-        connectionEncrypters: [noise()],
-        peerDiscovery: [mdns()],
-      });
+        if (LIBP2P_SERVER) {
+            // Direct connection mode
+            this.node = await createLibp2p({
+                transports: [tcp()],
+                streamMuxers: [yamux()],
+                connectionEncrypters: [noise()],
+            });
+            await this.node.start();
+            console.log('Client libp2p node started');
+            console.log('Node ID:', this.node.peerId.toString());
+            this.serverMultiaddr = LIBP2P_SERVER;
+            console.log(`Using LIBP2P_SERVER: ${this.serverMultiaddr}`);
+        } else {
+            // mDNS discovery mode
+            console.log('No LIBP2P_SERVER set, starting mDNS discovery...');
 
-      await this.node.start();
-      console.log('Client libp2p node started');
-      console.log('Node ID:', this.node.peerId.toString());
+            this.node = await createLibp2p({
+                transports: [tcp()],
+                streamMuxers: [yamux()],
+                connectionEncrypters: [noise()],
+                peerDiscovery: [mdns()],
+            });
 
-      // Wait for peer discovery via mDNS
-      try {
-        const discovered = await new Promise<any>((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error('mDNS discovery timeout after 15s')), 15000);
-          
-          this.node.addEventListener('peer:discovery', (event: any) => {
-            const peer = event.detail;
-            console.log(`Discovered peer via mDNS: ${peer.id.toString()}`);
-            if (peer.multiaddrs && peer.multiaddrs.length > 0) {
-              clearTimeout(timeout);
-              resolve(peer);
+            await this.node.start();
+            console.log('Client libp2p node started');
+            console.log('Node ID:', this.node.peerId.toString());
+
+            // Wait for peer discovery via mDNS
+            try {
+                const discovered = await this.waitForPeerDiscovery();
+                const discoveredAddr = discovered.multiaddrs[0];
+                this.serverMultiaddr = discoveredAddr !== undefined ? discoveredAddr.toString() : null;
+                console.log(`Using discovered server: ${this.serverMultiaddr}`);
+            } catch (error: unknown) {
+                const err = error as Error;
+                await this.node?.stop();
+                throw new Error(`Discovery failed: ${err.message}`);
             }
-          });
-        });
-        
-        this.serverMultiaddr = discovered.multiaddrs[0];
-        console.log(`Using discovered server: ${this.serverMultiaddr}`);
-      } catch (error: any) {
-        await this.node.stop();
-        throw new Error(`Discovery failed: ${error.message}`);
-      }
-    }
-
-    // Connect to server
-    console.log(`Connecting to server: ${this.serverMultiaddr}`);
-    await this.node.dial(this.serverMultiaddr);
-    console.log('Connected to server');
-  }
-
-  async call<M extends keyof TTSServiceMap>(
-    method: M, 
-    params: TTSServiceMap[M]['params']
-  ): Promise<TTSServiceMap[M]['result']> {
-    const stream = await this.node.newStream(this.serverMultiaddr, ['/tts/1.0.0']);
-    
-    try {
-      // Send request
-      const request = JSON.stringify({ method, params }) + '\n';
-      await stream.write(Buffer.from(request));
-
-      // Read response: accumulate until newline
-      let buffer = Buffer.alloc(0);
-      let responseText: string | null = null;
-      
-      while (true) {
-        const chunk = await stream.read();
-        if (chunk === null) break;
-        buffer = Buffer.concat([buffer, Buffer.from(chunk)]);
-        const newlineIndex = buffer.indexOf(10);
-        if (newlineIndex !== -1) {
-          responseText = buffer.toString('utf8', 0, newlineIndex);
-          break;
         }
-      }
 
-      if (!responseText) {
-        throw new Error('No response from server');
-      }
-
-      const response = JSON.parse(responseText) as TTSResponse<TTSServiceMap[M]['result']>;
-      
-      if (response.success) {
-        return response.result;
-      } else {
-        throw new Error(response.error);
-      }
-    } finally {
-      stream.close();
+        // Connect to server
+        if (!this.serverMultiaddr) {
+            throw new Error('No server multiaddr available');
+        }
+        
+        console.log(`Connecting to server: ${this.serverMultiaddr}`);
+        await this.node.dial(multiaddr(this.serverMultiaddr));
+        console.log('Connected to server');
     }
-  }
 
-  async close() {
-    if (this.node) {
-      await this.node.stop();
-      console.log('Client libp2p node stopped');
+    private waitForPeerDiscovery(): Promise<PeerInfo> {
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(
+                () => reject(new Error(ERROR_MESSAGES.DISCOVERY_TIMEOUT)),
+                DEFAULTS.DISCOVERY_TIMEOUT
+            );
+
+            const handlePeerDiscovery = (event: CustomEvent<PeerInfo>) => {
+                const peer = event.detail;
+                console.log(`Discovered peer via mDNS: ${peer.id.toString()}`);
+                if (peer.multiaddrs && peer.multiaddrs.length > 0) {
+                    clearTimeout(timeout);
+                    this.node?.removeEventListener('peer:discovery', handlePeerDiscovery);
+                    resolve(peer);
+                }
+            };
+
+            this.node?.addEventListener('peer:discovery', handlePeerDiscovery);
+        });
     }
-  }
+
+    async call<M extends TTSMethod>(
+        method: M,
+        params: TTSParamsMap[M]
+    ): Promise<TTSResultMap[M]> {
+        if (!this.node || !this.serverMultiaddr) {
+            throw new Error('Libp2p node not connected');
+        }
+
+        const stream = await this.node.dialProtocol(multiaddr(this.serverMultiaddr), [PROTOCOLS.TTS]);
+
+        try {
+            // Send request
+            const request = JSON.stringify({ method, params }) + '\n';
+            await stream.write(Buffer.from(request));
+
+            // Read response: accumulate until newline
+            let buffer = Buffer.alloc(0);
+            let responseText: string | null = null;
+
+            while (true) {
+                const chunk = await stream.read();
+                if (chunk === null) break;
+                buffer = Buffer.concat([buffer, Buffer.from(chunk)]);
+                const newlineIndex = buffer.indexOf(10); // newline character
+                if (newlineIndex !== -1) {
+                    responseText = buffer.toString('utf8', 0, newlineIndex);
+                    break;
+                }
+            }
+
+            if (!responseText) {
+                throw new Error(ERROR_MESSAGES.NO_RESPONSE);
+            }
+
+            const response = JSON.parse(responseText) as TTSResponse<M>;
+
+            if (response.success) {
+                return response.result;
+            } else {
+                throw new Error(response.error);
+            }
+        } finally {
+            stream.close();
+        }
+    }
+
+    async close(): Promise<void> {
+        if (this.node) {
+            await this.node.stop();
+            console.log('Client libp2p node stopped');
+        }
+    }
 }
 
 // ============================================================================
@@ -289,132 +280,134 @@ class Libp2pClient {
 type TTSClient = HTTPClient | Libp2pClient;
 
 async function createClient(): Promise<TTSClient> {
-  let finalServerUrl = SERVER_URL;
+    let finalServerUrl = SERVER_URL;
 
-  // Auto-discovery logic: if using default localhost and not in P2P mode, try to find a remote server
-  if (!LIBP2P_MODE && (SERVER_URL.includes('localhost') || SERVER_URL.includes('127.0.0.1'))) {
-    try {
-      console.log('🔍 Searching for a Supertonic server on the network...');
-      const ip = await discoverServer(3000); // Wait 3 seconds for discovery
-      finalServerUrl = `http://${ip}:3000`;
-      console.log(`📡 Auto-detected server at: ${finalServerUrl}`);
-    } catch (error) {
-      console.log('⚠️ No remote server discovered, falling back to local.');
+    // Auto-discovery logic: if using default localhost and not in P2P mode, try to find a remote server
+    if (!LIBP2P_MODE && (SERVER_URL.includes('localhost') || SERVER_URL.includes('127.0.0.1'))) {
+        try {
+            console.log('🔍 Searching for a Supertonic server on the network...');
+            const ip = await discoverServer(DEFAULTS.PORT);
+            finalServerUrl = `http://${ip}:${DEFAULTS.PORT}`;
+            console.log(`📡 Auto-detected server at: ${finalServerUrl}`);
+        } catch {
+            console.log('⚠️ No remote server discovered, falling back to local.');
+        }
     }
-  }
 
-  if (LIBP2P_MODE) {
-    console.log('Mode: Libp2p P2P');
-    const client = new Libp2pClient();
-    await client.connect();
-    return client;
-  } else {
-    console.log(`🚀 Mode: HTTP (${finalServerUrl})`);
-    return new HTTPClient(finalServerUrl);
-  }
+    if (LIBP2P_MODE) {
+        console.log('Mode: Libp2p P2P');
+        const client = new Libp2pClient();
+        await client.connect();
+        return client;
+    } else {
+        console.log(`🚀 Mode: HTTP (${finalServerUrl})`);
+        return new HTTPClient(finalServerUrl);
+    }
 }
 
-async function main() {
-  console.log('============================================================');
-  console.log('Supertonic TTS Client');
-  console.log('============================================================\n');
+async function main(): Promise<void> {
+    console.log('============================================================');
+    console.log('Supertonic TTS Client');
+    console.log('============================================================\n');
 
-  let client: TTSClient;
-  
-  try {
-    client = await createClient();
-  } catch (error: any) {
-    console.error('Failed to connect:', error.message);
-    process.exit(1);
-  }
+    let client: TTSClient;
 
-  try {
-    // Examples
-    console.log('\n[1] Health Check:');
-    const health = await client.call('health', {});
-    console.log('   Response:', health);
-    console.log('');
-
-    console.log('[2] Get Available Voices:');
-    const voices = await client.call('getVoices', {});
-    console.log('   Available voices:', voices.voices.join(', '));
-    console.log('');
-
-    console.log('[3] Synthesize English Text:');
-    const result1 = await client.call('synthesize', {
-      text: 'Hello, this is a test of the TTS service.',
-      voice: 'F1',
-      filename: 'client_test_en',
-      options: { rate: '0%' },
-      writeToFile: false  // Server won't save, client will
-    });
-    console.log('   ✓ Synthesis complete!');
-    console.log('   Detected language:', result1.detectedLanguage);
-    console.log('   Audio size (base64):', result1.audioBase64.length, 'characters');
-    
-    // Save audio file locally
-    const savedPath1 = saveAudioFile(result1.audioBase64, 'client_test_en');
-    console.log('   ✓ Saved locally to:', savedPath1);
-    console.log('');
-
-    console.log('[4] Synthesize Spanish Text:');
-    const result2 = await client.call('synthesize', {
-      text: 'Hola, este es un ejemplo en español.',
-      voice: 'M1',
-      filename: 'client_test_es',
-      options: { rate: '+10%' },
-      language: 'es',
-      writeToFile: false
-    });
-    console.log('   ✓ Synthesis complete!');
-    console.log('   Detected language:', result2.detectedLanguage);
-    
-    // Save audio file locally
-    const savedPath2 = saveAudioFile(result2.audioBase64, 'client_test_es');
-    console.log('   ✓ Saved locally to:', savedPath2);
-    console.log('');
-
-    console.log('[5] Synthesize Mixed-Language Text:');
-    const mixedText = '<en>Hello and welcome</en><es>Bienvenidos a todos</es><en>Thank you</en>';
-    const result3 = await client.call('synthesizeMixed', {
-      taggedText: mixedText,
-      voice: 'F2',
-      filename: 'client_test_mixed',
-      options: { rate: '0%' },
-      silenceDuration: 0.5,
-      writeToFile: false
-    });
-    console.log('   ✓ Synthesis complete!');
-    console.log('   Audio size (base64):', result3.audioBase64.length, 'characters');
-    
-    // Save audio file locally
-    const savedPath3 = saveAudioFile(result3.audioBase64, 'client_test_mixed');
-    console.log('   ✓ Saved locally to:', savedPath3);
-    console.log('');
-
-    console.log('[6] Error Handling Example:');
     try {
-      await client.call('synthesize', {
-        text: '',
-        voice: 'F1',
-        filename: 'error_test'
-      });
-    } catch (error: any) {
-      console.log('   Expected error caught:', error.message);
+        client = await createClient();
+    } catch (error: unknown) {
+        const err = error as Error;
+        console.error('Failed to connect:', err.message);
+        process.exit(1);
     }
-    console.log('');
 
-    console.log('='.repeat(60));
-    console.log('EXAMPLES COMPLETED SUCCESSFULLY!');
-    console.log(`Audio files saved to: ${join(process.cwd(), OUTPUT_DIR)}`);
-    console.log('='.repeat(60));
+    try {
+        // Examples
+        console.log('\n[1] Health Check:');
+        const health = await client.call(TTS_METHODS.HEALTH, {});
+        console.log('   Response:', health);
+        console.log('');
 
-  } catch (error) {
-    console.error('\n❌ Error:', error);
-  } finally {
-    await client.close();
-    console.log('\n✓ Client closed');
-  }
+        console.log('[2] Get Available Voices:');
+        const voices = await client.call(TTS_METHODS.GET_VOICES, {});
+        console.log('   Available voices:', voices.voices.join(', '));
+        console.log('');
+
+        console.log('[3] Synthesize English Text:');
+        const result1 = await client.call(TTS_METHODS.SYNTHESIZE, {
+            text: 'Hello, this is a test of the TTS service.',
+            voice: 'F1',
+            filename: 'client_test_en',
+            options: { rate: '0%' },
+            writeToFile: false, // Server won't save, client will
+        });
+        console.log('   ✓ Synthesis complete!');
+        console.log('   Detected language:', result1.detectedLanguage);
+        console.log('   Audio size (base64):', result1.audioBase64.length, 'characters');
+
+        // Save audio file locally
+        const savedPath1 = saveAudioFile(result1.audioBase64, 'client_test_en');
+        console.log('   ✓ Saved locally to:', savedPath1);
+        console.log('');
+
+        console.log('[4] Synthesize Spanish Text:');
+        const result2 = await client.call(TTS_METHODS.SYNTHESIZE, {
+            text: 'Hola, este es un ejemplo en español.',
+            voice: 'M1',
+            filename: 'client_test_es',
+            options: { rate: '+10%' },
+            language: 'es',
+            writeToFile: false,
+        });
+        console.log('   ✓ Synthesis complete!');
+        console.log('   Detected language:', result2.detectedLanguage);
+
+        // Save audio file locally
+        const savedPath2 = saveAudioFile(result2.audioBase64, 'client_test_es');
+        console.log('   ✓ Saved locally to:', savedPath2);
+        console.log('');
+
+        console.log('[5] Synthesize Mixed-Language Text:');
+        const mixedText = '<en>Hello and welcome</en><es>Bienvenidos a todos</es><en>Thank you</en>';
+        const result3 = await client.call(TTS_METHODS.SYNTHESIZE_MIXED, {
+            taggedText: mixedText,
+            voice: 'F2',
+            filename: 'client_test_mixed',
+            options: { rate: '0%' },
+            silenceDuration: DEFAULTS.DEFAULT_SILENCE_DURATION_MIXED,
+            writeToFile: false,
+        });
+        console.log('   ✓ Synthesis complete!');
+        console.log('   Audio size (base64):', result3.audioBase64.length, 'characters');
+
+        // Save audio file locally
+        const savedPath3 = saveAudioFile(result3.audioBase64, 'client_test_mixed');
+        console.log('   ✓ Saved locally to:', savedPath3);
+        console.log('');
+
+        console.log('[6] Error Handling Example:');
+        try {
+            await client.call(TTS_METHODS.SYNTHESIZE, {
+                text: '',
+                voice: 'F1',
+                filename: 'error_test',
+            });
+        } catch (error: unknown) {
+            const err = error as Error;
+            console.log('   Expected error caught:', err.message);
+        }
+        console.log('');
+
+        console.log('='.repeat(60));
+        console.log('EXAMPLES COMPLETED SUCCESSFULLY!');
+        console.log(`Audio files saved to: ${join(process.cwd(), OUTPUT_DIR)}`);
+        console.log('='.repeat(60));
+    } catch (error: unknown) {
+        const err = error as Error;
+        console.error('\n❌ Error:', err);
+    } finally {
+        await client.close();
+        console.log('\n✓ Client closed');
+    }
 }
 
 main().catch(console.error);

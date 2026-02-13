@@ -231,7 +231,7 @@ export class TTSService {
      * Get available voices
      * @returns Array of voice identifiers (F1-F5, M1-M5)
      */
-    async getVoices(): Promise<string[]> {
-        return Object.keys(VOICES);
+    async getVoices(): Promise<VoiceKey[]> {
+        return Object.keys(VOICES) as VoiceKey[];
     }
 }

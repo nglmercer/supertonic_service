@@ -5,40 +5,23 @@
 
 import { TTSService } from './tts/service.js';
 import type { LanguageDetector, LanguageDetectionResult } from './tts/service.js';
-import type { Language, SynthesisOptions } from './tts/types.js';
+import type { 
+    Language, 
+    SynthesisOptions, 
+    TTSMethod,
+    TTSRequest,
+    TTSResponse,
+    SynthesizeParams,
+    SynthesizeMixedParams
+} from './tts/types.js';
 import type { Libp2p } from 'libp2p';
-import type { Stream, Connection, PeerId } from '@libp2p/interface';
-
-// Libp2p TTS protocol types
-//type TTSMethod = 'synthesize' | 'synthesizeMixed' | 'getVoices' | 'health';
-
-interface SynthesizeParams {
-  text: string;
-  voice?: string;
-  filename?: string;
-  options?: SynthesisOptions;
-  language?: Language;
-  writeToFile?: boolean;
-}
-
-interface SynthesizeMixedParams {
-  taggedText: string;
-  voice?: string;
-  filename?: string;
-  options?: SynthesisOptions;
-  silenceDuration?: number;
-  writeToFile?: boolean;
-}
-
-type TTSRequest =
-  | { method: 'synthesize'; params: SynthesizeParams }
-  | { method: 'synthesizeMixed'; params: SynthesizeMixedParams }
-  | { method: 'getVoices'; params: Record<string, never> }
-  | { method: 'health'; params: Record<string, never> };
-
-type TTSResponse<T = any> =
-  | { success: true; result: T }
-  | { success: false; error: string };
+import type { PeerId } from '@libp2p/interface';
+import { 
+    ENV_VARS, 
+    DEFAULTS, 
+    ERROR_MESSAGES, 
+    PROTOCOLS 
+} from './tts/constants.js';
 
 // Environment configuration
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
