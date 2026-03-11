@@ -9,3 +9,5 @@ export { parseRateToSpeed, sanitizeFilename, parseLanguageSegments, concatenateW
 export { FileHandler } from './file-handler.js';
 export { SupertonicTTS } from './supertonic-client.js';
 export { TTSService, type LanguageDetectionResult, type LanguageDetector } from './service.js';
+export { initTTSService, getTTSService, customDetector } from './init.js';
+export { processTTSRequest } from './processor.js';

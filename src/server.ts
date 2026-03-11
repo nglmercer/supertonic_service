@@ -22,7 +22,10 @@ import {
     ERROR_MESSAGES, 
     PROTOCOLS 
 } from './tts/constants.js';
-import { initTTSService,handleRequest,initLibp2p,libp2pNode } from './handler.js';
+import { initTTSService } from './tts/init.js';
+import { handleHttpRequest as handleRequest } from './http/handler.js';
+import { initLibp2p, libp2pNode, stopLibp2p } from './p2p/node.js';
+import { p2pProtocolHandler } from './p2p/handler.js';
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
 const HOST = process.env.HOST || '0.0.0.0';
 async function main() {
@@ -39,7 +42,7 @@ async function main() {
     initTTSService();
 
     // Start libp2p node for discovery and P2P communication
-    await initLibp2p();
+    await initLibp2p(p2pProtocolHandler);
 
     const server = Bun.serve({
         port: PORT,
