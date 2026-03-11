@@ -1,4 +1,9 @@
-"¡Hola! Esta es una prueba de voz para evaluar la naturalidad y la dicción del sistema. Es fundamental que la entonación sea fluida, especialmente al pronunciar palabras complejas como 'desoxirribonucleico' o frases con signos de interrogación.
+"¡Hola! Esta es una prueba de voz para evaluar la naturalidad y la dicción del sistema. 
+Es fundamental que la entonación sea fluida, 
+especialmente al pronunciar palabras complejas como 'desoxirribonucleico' o frases con signos de interrogación.
 
-¿Cómo suena la transición entre las palabras? ¿Se percibe una pausa adecuada en el punto y seguido? Espero que la calidad sea óptima para nuestro proyecto, incluso cuando mencionamos fechas como el 24 de diciembre de 2026."
+¿Cómo suena la transición entre las palabras?
+¿Se percibe una pausa adecuada en el punto y seguido? 
+Espero que la calidad sea óptima para nuestro proyecto, 
+incluso cuando mencionamos fechas como el 24 de diciembre de 2026."
 

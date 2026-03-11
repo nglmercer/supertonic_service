@@ -63,7 +63,19 @@ export class HTTPClient {
             body: isGetRequest ? undefined : JSON.stringify(params),
         });
 
-        const data = await response.json() as TTSResponse<M>;
+        let responseText: string;
+        try {
+            responseText = await response.text();
+        } catch {
+            throw new Error(`HTTP ${response.status}: Could not read response body`);
+        }
+
+        let data: TTSResponse<M>;
+        try {
+            data = JSON.parse(responseText) as TTSResponse<M>;
+        } catch {
+            throw new Error(`HTTP ${response.status}: Invalid JSON response: ${responseText}`);
+        }
 
         if (!response.ok || data.success === false) {
             const errorMessage = data.success === false 

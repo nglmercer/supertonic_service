@@ -53,9 +53,19 @@ async function createClient(): Promise<TTSClient> {
     if (!libp2pMode && (serverUrl.includes('localhost') || serverUrl.includes('127.0.0.1'))) {
         try {
             console.log('🔍 Searching for a Supertonic server on the network...');
-            const ip = await discoverServer(DEFAULTS.PORT);
-            finalServerUrl = `http://${ip}:${DEFAULTS.PORT}`;
+            const discovered = await discoverServer(DEFAULTS.PORT);
+            finalServerUrl = `http://${discovered.ip}:${DEFAULTS.PORT}`;
             console.log(`📡 Auto-detected server at: ${finalServerUrl}`);
+            
+            // Verify the discovered server has the expected API
+            const testClient = new HTTPClient(finalServerUrl);
+            try {
+                await testClient.call(TTS_METHODS.HEALTH, {});
+                console.log('✓ Discovered server is compatible');
+            } catch {
+                console.log('⚠️ Discovered server not compatible, falling back to localhost');
+                finalServerUrl = `http://localhost:${DEFAULTS.PORT}`;
+            }
         } catch {
             console.log('⚠️ No remote server discovered, falling back to local.');
         }
@@ -119,7 +129,7 @@ async function main(): Promise<void> {
         console.log('[4] Synthesize Spanish Text:');
         const result2 = await client.call(TTS_METHODS.SYNTHESIZE, {
             text: SPANISH_TEXT,
-            voice: 'M1',
+            voice: 'F1',
             filename: 'client_test_es',
             options: { rate: '+10%' },
             language: 'es',
@@ -149,7 +159,6 @@ async function main(): Promise<void> {
         // Save audio file locally
         const savedPath3 = saveAudioFile(result3.audioBase64, 'client_test_mixed', outputDir);
         console.log('   ✓ Saved locally to:', savedPath3);
-        console.log('');
 
         console.log('[6] Error Handling Example:');
         try {
@@ -162,12 +171,9 @@ async function main(): Promise<void> {
             const err = error as Error;
             console.log('   Expected error caught:', err.message);
         }
-        console.log('');
 
-        console.log('='.repeat(60));
         console.log('EXAMPLES COMPLETED SUCCESSFULLY!');
         console.log(`Audio files saved to: ${join(process.cwd(), outputDir)}`);
-        console.log('='.repeat(60));
     } catch (error: unknown) {
         const err = error as Error;
         console.error('\n❌ Error:', err);

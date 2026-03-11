@@ -258,9 +258,11 @@ export async function handleRequest(req: Request): Promise<Response> {
 
             return new Response(JSON.stringify({
                 success: true,
-                savedPath: result.savedPath,
-                audioBase64: result.fileBuffer.toString('base64'),
-                detectedLanguage: result.detectedLanguage,
+                result: {
+                    savedPath: result.savedPath,
+                    audioBase64: result.fileBuffer.toString('base64'),
+                    detectedLanguage: result.detectedLanguage,
+                }
             }), { 
                 status: 200, 
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -275,8 +277,10 @@ export async function handleRequest(req: Request): Promise<Response> {
 
             return new Response(JSON.stringify({
                 success: true,
-                savedPath: result.savedPath,
-                audioBase64: result.fileBuffer.toString('base64'),
+                result: {
+                    savedPath: result.savedPath,
+                    audioBase64: result.fileBuffer.toString('base64'),
+                }
             }), { 
                 status: 200, 
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -285,7 +289,10 @@ export async function handleRequest(req: Request): Promise<Response> {
 
         if (method === 'GET' && url.pathname === '/api/tts/voices') {
             const voices = await ttsService.getVoices();
-            return new Response(JSON.stringify({ voices }), { 
+            return new Response(JSON.stringify({ 
+                success: true,
+                result: { voices } 
+            }), { 
                 status: 200, 
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
             });
@@ -293,9 +300,12 @@ export async function handleRequest(req: Request): Promise<Response> {
 
         if (method === 'GET' && (url.pathname === '/api/tts/health' || url.pathname === '/api/health' || url.pathname === '/health')) {
             return new Response(JSON.stringify({
-                status: 'ok',
-                timestamp: new Date().toISOString(),
-                libp2p: libp2pNode ? 'enabled' : 'disabled'
+                success: true,
+                result: {
+                    status: 'ok',
+                    timestamp: new Date().toISOString(),
+                    libp2p: libp2pNode ? 'enabled' : 'disabled'
+                }
             }), { 
                 status: 200, 
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
