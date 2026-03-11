@@ -1,4 +1,4 @@
-import { pipeline, type TextToAudioOutput, type TextToAudioPipelineOptions, env } from '@huggingface/transformers';
+import { pipeline, type TextToAudioOutput, type TextToAudioPipelineOptions, type PretrainedModelOptions, env } from '@huggingface/transformers';
 import * as os from 'os';
 import * as path from 'path';
 import { VOICES, type VoiceKey, type AudioOutput } from './types.js';
@@ -26,13 +26,89 @@ type TextToSpeechPipeline = Awaited<ReturnType<typeof pipeline>>;
  * Implements singleton pattern for the pipeline to avoid reinitialization
  */
 class SupertonicTTS {
+    private static classInstance: SupertonicTTS | null = null;
     private static instance: TextToSpeechPipeline | null = null;
+    
+    // Default configuration for the pipeline initialization
+    private static pipelineConfig: PretrainedModelOptions = {
+        device: 'auto',
+        session_options: {
+            intraOpNumThreads: Number(process.env.ORT_NUM_THREADS) || defaultThreads,
+            // interOpNumThreads: 1,
+            // executionMode: 'sequential',
+            // graphOptimizationLevel: 'all',
+        }
+    };
+    
     private readonly baseUrl: string;
-    private defaultVoice: string;
+    private defaultVoiceUrl: string;
+    private options: Partial<TextToAudioPipelineOptions>;
 
-    constructor(defaultVoice: VoiceKey = 'F1') {
+    /**
+     * Private constructor for singleton pattern
+     */
+    private constructor(defaultVoice: VoiceKey = 'F1', pipelineConfig: PretrainedModelOptions = SupertonicTTS.pipelineConfig) {
         this.baseUrl = BASE_URL;
-        this.defaultVoice = `${this.baseUrl}${VOICES[defaultVoice]}`;
+        this.defaultVoiceUrl = `${this.baseUrl}${VOICES[defaultVoice]}`;
+        this.options = {
+            num_inference_steps: 5,
+            speed: 1.0,
+        };
+        SupertonicTTS.setPipelineConfig(pipelineConfig);
+    }
+
+    /**
+     * Get the singleton instance of SupertonicTTS
+     */
+    public static getInstance(defaultVoice: VoiceKey = 'F1'): SupertonicTTS {
+        if (!SupertonicTTS.classInstance) {
+            SupertonicTTS.classInstance = new SupertonicTTS(defaultVoice);
+        }
+        return SupertonicTTS.classInstance;
+    }
+    
+    /**
+     * Set global pipeline initialization configuration
+     * @param config Partial configuration for the pipeline() call
+     */
+    public static setPipelineConfig(config: PretrainedModelOptions): void {
+        SupertonicTTS.pipelineConfig = {
+            ...SupertonicTTS.pipelineConfig,
+            ...config,
+            session_options: {
+                ...SupertonicTTS.pipelineConfig.session_options,
+                ...(config.session_options || {})
+            }
+        };
+    }
+
+    /**
+     * Get current pipeline initialization configuration
+     */
+    public static getPipelineConfig(): PretrainedModelOptions {
+        return { ...SupertonicTTS.pipelineConfig };
+    }
+
+    /**
+     * Set configuration for all synthesis calls
+     * @param options Partial pipeline options (speed, num_inference_steps, etc.)
+     */
+    public setConfig(options: Partial<TextToAudioPipelineOptions>): void {
+        this.options = { ...this.options, ...options };
+    }
+
+    /**
+     * Get current persistent configuration
+     */
+    public getConfig(): Partial<TextToAudioPipelineOptions> {
+        return { ...this.options };
+    }
+
+    /**
+     * Set the default voice (default is 'F1')
+     */
+    public setDefaultVoice(voiceKey: VoiceKey): void {
+        this.defaultVoiceUrl = `${this.baseUrl}${VOICES[voiceKey]}`;
     }
 
     /**
@@ -40,22 +116,23 @@ class SupertonicTTS {
      */
     private async getPipeline(): Promise<TextToSpeechPipeline> {
         if (!SupertonicTTS.instance) {
-            SupertonicTTS.instance = await pipeline('text-to-speech', 'onnx-community/Supertonic-TTS-2-ONNX', {
-                device: 'cpu',
-                session_options: {
-                    // Optimized for CPU performance while maintaining compatibility
-                    intraOpNumThreads: Number(process.env.ORT_NUM_THREADS) || defaultThreads,
-                    interOpNumThreads: 1, // Keep inter-op low to reduce overhead for sequential models
-                    executionMode: 'sequential', // Sequential execution is more stable on limited devices
-                    graphOptimizationLevel: 'all', // Enable all graph optimizations (fusion, constant folding, etc.)
+            SupertonicTTS.instance = await pipeline(
+                'text-to-speech', 
+                'onnx-community/Supertonic-TTS-2-ONNX', 
+                {
+                    device: 'auto',
+                    ...SupertonicTTS.pipelineConfig,
                 }
-            });
+            );
         }
         return SupertonicTTS.instance;
     }
 
     /**
      * Generate audio from text
+     * @param text The text to synthesize
+     * @param voiceKey Specific voice to use (optional, uses default if not provided)
+     * @param customOptions Specific options for this call (merges with global config)
      */
     public async speak(
         text: string,
@@ -64,21 +141,20 @@ class SupertonicTTS {
     ): Promise<AudioOutput> {
         const tts = await this.getPipeline();
 
-        const voiceUrl = voiceKey ? `${this.baseUrl}${VOICES[voiceKey]}` : this.defaultVoice;
+        const voiceUrl = voiceKey ? `${this.baseUrl}${VOICES[voiceKey]}` : this.defaultVoiceUrl;
 
-        const options: TextToAudioPipelineOptions = {
+        const combinedOptions: TextToAudioPipelineOptions = {
             speaker_embeddings: voiceUrl,
-            num_inference_steps: 5,
-            speed: 1.0,
+            ...this.options,
             ...customOptions
         };
 
-        const result = await tts(text, options);
+        const result = await tts(text, combinedOptions);
         return result as AudioOutput;
     }
 
     /**
-     * Get available voice keys
+     * Get list of all available voice keys
      */
     public getAvailableVoices(): VoiceKey[] {
         return Object.keys(VOICES) as VoiceKey[];

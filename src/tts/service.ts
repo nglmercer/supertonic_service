@@ -36,7 +36,7 @@ export class TTSService {
      */
     private constructor(outputDir: string = './output', languageDetector?: LanguageDetector) {
         this.fileHandler = new FileHandler({ outputDir });
-        this.supertonic = new SupertonicTTS('F1'); // Default voice: F1
+        this.supertonic = SupertonicTTS.getInstance('F1'); // Default voice: F1
         this.languageDetector = languageDetector || defaultDetectLanguageFromPreprocessor;
     }
 
