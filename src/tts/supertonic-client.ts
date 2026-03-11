@@ -31,7 +31,7 @@ class SupertonicTTS {
     
     // Default configuration for the pipeline initialization
     private static pipelineConfig: PretrainedModelOptions = {
-        device: 'auto',
+        device: 'cpu',
         session_options: {
             intraOpNumThreads: Number(process.env.ORT_NUM_THREADS) || defaultThreads,
             // interOpNumThreads: 1,
@@ -120,7 +120,7 @@ class SupertonicTTS {
                 'text-to-speech', 
                 'onnx-community/Supertonic-TTS-2-ONNX', 
                 {
-                    device: 'auto',
+                    device: 'cpu',
                     ...SupertonicTTS.pipelineConfig,
                 }
             );
