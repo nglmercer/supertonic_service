@@ -1,0 +1,3 @@
+"Hello there! I am testing the clarity and emotion of this voice synthesis. It’s important to know if the AI sounds natural or a bit too much like a robot from a 1950s sci-fi movie.
+
+Does it pause correctly at commas? Let’s find out. I also need to check how it handles numbers and symbols, like $1,250.40 or a temperature of 75°F. If everything sounds smooth, we are ready to go!"
