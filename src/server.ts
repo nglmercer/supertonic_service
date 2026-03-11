@@ -14,8 +14,6 @@ import type {
     SynthesizeParams,
     SynthesizeMixedParams
 } from './tts/types.js';
-import type { Libp2p } from 'libp2p';
-import type { PeerId } from '@libp2p/interface';
 import { 
     ENV_VARS, 
     DEFAULTS, 
@@ -24,10 +22,11 @@ import {
 } from './tts/constants.js';
 import { initTTSService } from './tts/init.js';
 import { handleHttpRequest as handleRequest } from './http/handler.js';
-import { initLibp2p, libp2pNode, stopLibp2p } from './p2p/node.js';
+import { initLibp2p, libp2pNode } from './p2p/node.js';
 import { p2pProtocolHandler } from './p2p/handler.js';
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
-const HOST = process.env.HOST || '0.0.0.0';
+import { ROUTES } from './http/routes.js';
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : DEFAULTS.PORT;
+const HOST = process.env.HOST || DEFAULTS.HOST;
 async function main() {
     // Skip main execution when running tests
     if (process.env.NODE_ENV === 'test' || process.env.BUN_ENV === 'test') {
@@ -68,10 +67,9 @@ async function main() {
     
     console.log('');
     console.log('Available REST API Endpoints:');
-    console.log(`  POST /api/tts/synthesize`);
-    console.log(`  POST /api/tts/synthesize-mixed`);
-    console.log(`  GET  /api/tts/voices`);
-    console.log(`  GET  /api/tts/health`);
+    ROUTES.forEach(route => {
+        console.log(`  ${route.method.padEnd(5)} ${route.path.padEnd(30)} - ${route.description}`);
+    });
     console.log('='.repeat(60));
 
     process.on('SIGINT', async () => {
