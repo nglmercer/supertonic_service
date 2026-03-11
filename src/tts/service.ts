@@ -118,7 +118,7 @@ export class TTSService {
                 voiceKey,
                 {
                     speed: speed,
-                    num_inference_steps: 5
+                    num_inference_steps: 25
                 }
             );
 
@@ -191,7 +191,7 @@ export class TTSService {
                     voiceKey,
                     {
                         speed: speed,
-                        num_inference_steps: 5
+                        num_inference_steps: 25
                     }
                 );
 

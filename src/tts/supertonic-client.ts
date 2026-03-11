@@ -51,8 +51,8 @@ class SupertonicTTS {
         this.baseUrl = BASE_URL;
         this.defaultVoiceUrl = `${this.baseUrl}${VOICES[defaultVoice]}`;
         this.options = {
-            num_inference_steps: 5,
-            speed: 1.0,
+            num_inference_steps: 25,
+            // speed: 1.0,
         };
         SupertonicTTS.setPipelineConfig(pipelineConfig);
     }
